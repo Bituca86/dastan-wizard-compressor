@@ -36,8 +36,14 @@ jobs:
           cp dw_flutter/pubspec.yaml /tmp/dw_project/pubspec.yaml
           cp dw_flutter/android/app/src/main/AndroidManifest.xml /tmp/dw_project/android/app/src/main/AndroidManifest.xml
 
-      - name: Patch Android minSdk to 24
-        run: sed -i 's/flutter\.minSdkVersion/24/g' /tmp/dw_project/android/app/build.gradle
+      - name: Patch Android config
+        run: |
+          sed -i 's/flutter\.minSdkVersion/24/g' /tmp/dw_project/android/app/build.gradle
+          sed -i 's/RepositoriesMode.PREFER_SETTINGS/RepositoriesMode.PREFER_PROJECT/' /tmp/dw_project/android/settings.gradle || true
+          echo "=== settings.gradle ==="
+          cat /tmp/dw_project/android/settings.gradle
+          echo "=== app/build.gradle ==="
+          cat /tmp/dw_project/android/app/build.gradle
 
       - name: Flutter pub get
         run: cd /tmp/dw_project && flutter pub get
