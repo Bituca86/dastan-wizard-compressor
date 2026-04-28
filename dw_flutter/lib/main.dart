@@ -251,6 +251,62 @@ class _HomeState extends State<HomeScreen> {
     );
   }
 
+  Future<void> _saveToDownloads(VideoJob job) async {
+    if (job.outputPath == null) return;
+    try {
+      // Request storage permission
+      await Permission.storage.request();
+      await Permission.manageExternalStorage.request();
+
+      final base = p.basenameWithoutExtension(job.name);
+      final ts = DateTime.now().millisecondsSinceEpoch;
+      final fileName = '${base}_DW_${ts}.mp4';
+
+      // Try Downloads folder directly
+      final dlDir = Directory('/storage/emulated/0/Download/DastanWizard');
+      if (!await dlDir.exists()) await dlDir.create(recursive: true);
+
+      final dest = '${dlDir.path}/$fileName';
+      await File(job.outputPath!).copy(dest);
+
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+        backgroundColor: cGreen,
+        content: Text('✓ Salvat în Download/DastanWizard/$fileName',
+          style: GoogleFonts.jetBrainsMono(fontSize: 11, color: Colors.black)),
+        duration: const Duration(seconds: 5),
+      ));
+    } catch (e) {
+      // Fallback: app external dir (always accessible)
+      try {
+        final extDir = await getExternalStorageDirectory();
+        if (extDir == null) throw Exception('No external storage');
+        final saveDir = Directory('${extDir.path}/DastanWizard');
+        if (!await saveDir.exists()) await saveDir.create(recursive: true);
+
+        final base = p.basenameWithoutExtension(job.name);
+        final ts = DateTime.now().millisecondsSinceEpoch;
+        final fileName = '${base}_DW_${ts}.mp4';
+        await File(job.outputPath!).copy('${saveDir.path}/$fileName');
+
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          backgroundColor: cWarn,
+          content: Text('Salvat în Android/data/.../files/DastanWizard/$fileName',
+            style: GoogleFonts.jetBrainsMono(fontSize: 10, color: Colors.black)),
+          duration: const Duration(seconds: 6),
+        ));
+      } catch (e2) {
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          backgroundColor: cDanger,
+          content: Text('Eroare la salvare: $e2',
+            style: GoogleFonts.jetBrainsMono(fontSize: 10, color: Colors.white)),
+        ));
+      }
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final hasPending = _queue.any((j) => j.status == JobStatus.queued);
@@ -439,17 +495,29 @@ class _HomeState extends State<HomeScreen> {
                 _stat('RATIO', job.ratioStr, cText),
               ]),
               const SizedBox(height:10),
-              SizedBox(width: double.infinity,
-                child: ElevatedButton.icon(
-                  onPressed: () => _shareFile(job),
-                  icon: const Icon(Icons.share, size:16),
-                  label: Text('DESCARCĂ / SHARE', style: GoogleFonts.jetBrainsMono(
+              Row(children: [
+                Expanded(child: ElevatedButton.icon(
+                  onPressed: () => _saveToDownloads(job),
+                  icon: const Icon(Icons.download, size:16),
+                  label: Text('SALVEAZĂ', style: GoogleFonts.jetBrainsMono(
                     fontSize:11, fontWeight: FontWeight.w700, letterSpacing:1)),
                   style: ElevatedButton.styleFrom(
                     backgroundColor: cTeal, foregroundColor: Colors.black,
                     shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(6)),
                     padding: const EdgeInsets.symmetric(vertical:10)),
                 )),
+                const SizedBox(width: 8),
+                OutlinedButton.icon(
+                  onPressed: () => _shareFile(job),
+                  icon: const Icon(Icons.share, size:16),
+                  label: Text('SHARE', style: GoogleFonts.jetBrainsMono(fontSize:11)),
+                  style: OutlinedButton.styleFrom(
+                    foregroundColor: cText,
+                    side: const BorderSide(color: cBorder),
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(6)),
+                    padding: const EdgeInsets.symmetric(vertical:10, horizontal:14)),
+                ),
+              ]),
             ])),
       ]),
     );
