@@ -1,0 +1,38 @@
+name: dastan_wizard_compressor
+description: Dastan Wizard Video Compressor Android - FFmpeg powered
+publish_to: 'none'
+version: 1.0.0+1
+
+environment:
+  sdk: '>=3.0.0 <4.0.0'
+
+dependencies:
+  flutter:
+    sdk: flutter
+  
+  # FFmpeg - full build with H.264, H.265, VP9, AAC, Opus + GPL codecs
+  ffmpeg_kit_flutter_full_gpl: ^6.0.3
+
+  # File picker for selecting videos
+  file_picker: ^8.0.0+1
+  
+  # Path utilities
+  path_provider: ^2.1.1
+  path: ^1.8.3
+  
+  # Share / export compressed files
+  share_plus: ^9.0.0
+  
+  # Permissions
+  permission_handler: ^11.3.0
+  
+  # Google Fonts (Orbitron, JetBrains Mono)
+  google_fonts: ^6.2.1
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^3.0.0
+
+flutter:
+  uses-material-design: true
