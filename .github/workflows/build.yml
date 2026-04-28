@@ -38,34 +38,29 @@ jobs:
 
       - name: Patch Android config
         run: |
-          # 1. minSdk 24 (necesar pentru video_compress)
+          echo "=== BEFORE PATCH: android/build.gradle ==="
+          cat /tmp/dw_project/android/build.gradle
+
+          # Fix minSdk
           find /tmp/dw_project/android -name "build.gradle" -path "*/app/*" \
             -exec sed -i 's/flutter\.minSdkVersion/24/g' {} \;
 
-          # 2. Forțăm Kotlin 1.9.10 prin gradle.properties (cel mai fiabil mod)
-          echo "" >> /tmp/dw_project/android/gradle.properties
-          echo "kotlin.version=1.9.10" >> /tmp/dw_project/android/gradle.properties
+          # Fix Kotlin version - acoperim toate formatele posibile
+          GRADLE=/tmp/dw_project/android/build.gradle
 
-          # 3. Patch orice format de kotlin_version din build.gradle
-          sed -i "s/kotlin_version = '1\.[0-9][^']*'/kotlin_version = '1.9.10'/g" \
-            /tmp/dw_project/android/build.gradle 2>/dev/null || true
-          sed -i 's/kotlin_version = "1\.[0-9][^"]*"/kotlin_version = "1.9.10"/g' \
-            /tmp/dw_project/android/build.gradle 2>/dev/null || true
+          # Format 1: ext.kotlin_version = '1.x.x'
+          sed -i "s/ext\.kotlin_version = '[^']*'/ext.kotlin_version = '1.9.10'/" "$GRADLE" || true
 
-          # 4. Forțăm stdlib-ul Kotlin prin resolution strategy
-          echo "" >> /tmp/dw_project/android/app/build.gradle
-          echo "configurations.all {" >> /tmp/dw_project/android/app/build.gradle
-          echo "    resolutionStrategy {" >> /tmp/dw_project/android/app/build.gradle
-          echo "        force 'org.jetbrains.kotlin:kotlin-stdlib:1.9.10'" >> /tmp/dw_project/android/app/build.gradle
-          echo "        force 'org.jetbrains.kotlin:kotlin-stdlib-jdk7:1.9.10'" >> /tmp/dw_project/android/app/build.gradle
-          echo "        force 'org.jetbrains.kotlin:kotlin-stdlib-jdk8:1.9.10'" >> /tmp/dw_project/android/app/build.gradle
-          echo "    }" >> /tmp/dw_project/android/app/build.gradle
-          echo "}" >> /tmp/dw_project/android/app/build.gradle
+          # Format 2: classpath "org.jetbrains.kotlin:kotlin-gradle-plugin:x.x.x"
+          sed -i 's/org\.jetbrains\.kotlin:kotlin-gradle-plugin:[0-9][0-9.]*/org.jetbrains.kotlin:kotlin-gradle-plugin:1.9.10/g' "$GRADLE" || true
 
-          echo "=== gradle.properties ==="
-          cat /tmp/dw_project/android/gradle.properties
-          echo "=== app/build.gradle (final 10 linii) ==="
-          tail -15 /tmp/dw_project/android/app/build.gradle
+          # Format 3: dacă nu există deloc, adaugă ext.kotlin_version în buildscript
+          if ! grep -q "kotlin_version\|kotlin-gradle-plugin" "$GRADLE" 2>/dev/null; then
+            sed -i 's/^buildscript {/buildscript {\n    ext.kotlin_version = "1.9.10"/' "$GRADLE" || true
+          fi
+
+          echo "=== AFTER PATCH: android/build.gradle ==="
+          cat /tmp/dw_project/android/build.gradle
 
       - name: Flutter pub get
         run: cd /tmp/dw_project && flutter pub get
