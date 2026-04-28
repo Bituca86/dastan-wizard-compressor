@@ -38,28 +38,10 @@ jobs:
 
       - name: Patch Android config
         run: |
-          find /tmp/dw_project/android -name "build.gradle" -path "*/app/*" \
-            -exec sed -i 's/flutter\.minSdkVersion/24/g' {} \;
-
-          # Add -Xskip-metadata-version-check to ALL Kotlin compile tasks
-          # This lets Kotlin 1.7.x compile sources compiled with Kotlin 1.9.x
-          cat >> /tmp/dw_project/android/build.gradle << 'GRADLE_PATCH'
-
-subprojects {
-    afterEvaluate { project ->
-        project.tasks.withType(
-            org.jetbrains.kotlin.gradle.tasks.KotlinCompile.class
-        ).configureEach {
-            kotlinOptions {
-                freeCompilerArgs += ['-Xskip-metadata-version-check']
-                jvmTarget = '1.8'
-            }
-        }
-    }
-}
-GRADLE_PATCH
-          echo "=== android/build.gradle ==="
-          cat /tmp/dw_project/android/build.gradle
+          find /tmp/dw_project/android -name "build.gradle" -path "*/app/*" -exec sed -i 's/flutter\.minSdkVersion/24/g' {} \;
+          echo "CnN1YnByb2plY3RzIHsKICAgIGFmdGVyRXZhbHVhdGUgeyBwcm9qZWN0IC0+CiAgICAgICAgcHJvamVjdC50YXNrcy53aXRoVHlwZSgKICAgICAgICAgICAgb3JnLmpldGJyYWlucy5rb3RsaW4uZ3JhZGxlLnRhc2tzLktvdGxpbkNvbXBpbGUuY2xhc3MKICAgICAgICApLmNvbmZpZ3VyZUVhY2ggewogICAgICAgICAgICBrb3RsaW5PcHRpb25zIHsKICAgICAgICAgICAgICAgIGZyZWVDb21waWxlckFyZ3MgKz0gWyctWHNraXAtbWV0YWRhdGEtdmVyc2lvbi1jaGVjayddCiAgICAgICAgICAgICAgICBqdm1UYXJnZXQgPSAnMS44JwogICAgICAgICAgICB9CiAgICAgICAgfQogICAgfQp9Cg==" | base64 -d >> /tmp/dw_project/android/build.gradle
+          echo "=== android/build.gradle (last 20 lines) ==="
+          tail -20 /tmp/dw_project/android/build.gradle
 
       - name: Flutter pub get
         run: cd /tmp/dw_project && flutter pub get
