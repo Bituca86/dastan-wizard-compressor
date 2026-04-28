@@ -101,7 +101,7 @@ class _HomeState extends State<HomeScreen> {
     switch (_quality.round()) {
       case 0: return VideoQuality.LowQuality;
       case 1: return VideoQuality.MediumQuality;
-      case 2: return VideoQuality.HighQuality;
+      case 2: return VideoQuality.Res1280x720Quality;
       default: return VideoQuality.HighestQuality;
     }
   }
@@ -158,7 +158,7 @@ class _HomeState extends State<HomeScreen> {
       final info = await VideoCompress.getMediaInfo(job.path);
       if (!mounted) return;
       setState(() {
-        job.duration = info.duration?.inSeconds.toDouble() ?? 0;
+        job.duration = (info.duration ?? 0) / 1000.0;
         final w = info.width ?? 0;
         final h = info.height ?? 0;
         if (w > 0) job.dims = '${w}×${h}';
