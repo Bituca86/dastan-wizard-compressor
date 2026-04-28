@@ -39,9 +39,9 @@ jobs:
       - name: Patch Android config
         run: |
           find /tmp/dw_project/android -name "build.gradle" -path "*/app/*" -exec sed -i 's/flutter\.minSdkVersion/24/g' {} \;
-          echo "CnN1YnByb2plY3RzIHsKICAgIGFmdGVyRXZhbHVhdGUgeyBwcm9qZWN0IC0+CiAgICAgICAgcHJvamVjdC50YXNrcy53aXRoVHlwZSgKICAgICAgICAgICAgb3JnLmpldGJyYWlucy5rb3RsaW4uZ3JhZGxlLnRhc2tzLktvdGxpbkNvbXBpbGUuY2xhc3MKICAgICAgICApLmNvbmZpZ3VyZUVhY2ggewogICAgICAgICAgICBrb3RsaW5PcHRpb25zIHsKICAgICAgICAgICAgICAgIGZyZWVDb21waWxlckFyZ3MgKz0gWyctWHNraXAtbWV0YWRhdGEtdmVyc2lvbi1jaGVjayddCiAgICAgICAgICAgICAgICBqdm1UYXJnZXQgPSAnMS44JwogICAgICAgICAgICB9CiAgICAgICAgfQogICAgfQp9Cg==" | base64 -d >> /tmp/dw_project/android/build.gradle
-          echo "=== android/build.gradle (last 20 lines) ==="
-          tail -20 /tmp/dw_project/android/build.gradle
+          echo "CnN1YnByb2plY3RzIHsKICAgIHRhc2tzLndpdGhUeXBlKG9yZy5qZXRicmFpbnMua290bGluLmdyYWRsZS50YXNrcy5Lb3RsaW5Db21waWxlKS5jb25maWd1cmVFYWNoIHsKICAgICAgICBrb3RsaW5PcHRpb25zIHsKICAgICAgICAgICAgZnJlZUNvbXBpbGVyQXJncyArPSBbIi1Yc2tpcC1tZXRhZGF0YS12ZXJzaW9uLWNoZWNrIl0KICAgICAgICAgICAganZtVGFyZ2V0ID0gIjEuOCIKICAgICAgICB9CiAgICB9Cn0K" | base64 -d >> /tmp/dw_project/android/build.gradle
+          echo "=== last 15 lines of build.gradle ==="
+          tail -15 /tmp/dw_project/android/build.gradle
 
       - name: Flutter pub get
         run: cd /tmp/dw_project && flutter pub get
