@@ -196,26 +196,6 @@ class _HomeState extends State<HomeScreen> {
     });
 
     try {
-      // Calculăm rezoluția target (nu urcăm niciodată peste original)
-      final srcW = job.w > 0 ? job.w : 1280;
-      final srcH = job.h > 0 ? job.h : 720;
-
-      // Target dimensions — maximum 720p pentru calitate 0-2, 1080p pentru 3
-      final maxH = _quality.round() >= 3 ? 1080 : 720;
-      int targetW = srcW;
-      int targetH = srcH;
-      if (srcH > maxH) {
-        final scale = maxH / srcH;
-        targetH = maxH;
-        targetW = (srcW * scale).round();
-        // Ensure even numbers (required by most codecs)
-        targetW = targetW % 2 == 0 ? targetW : targetW - 1;
-      }
-      // Never upscale
-      if (targetH > srcH) { targetW = srcW; targetH = srcH; }
-
-      _log_('  Rezoluție: ${srcW}x${srcH} → ${targetW}x${targetH}');
-
       final info = await VideoCompress.compressVideo(
         job.path,
         quality: _vq,
