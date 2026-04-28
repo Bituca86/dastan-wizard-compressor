@@ -38,12 +38,34 @@ jobs:
 
       - name: Patch Android config
         run: |
+          # 1. minSdk 24 (necesar pentru video_compress)
           find /tmp/dw_project/android -name "build.gradle" -path "*/app/*" \
             -exec sed -i 's/flutter\.minSdkVersion/24/g' {} \;
-          sed -i "s/ext\.kotlin_version = '[^']*'/ext.kotlin_version = '1.9.10'/" \
-            /tmp/dw_project/android/build.gradle || true
-          echo "=== android/build.gradle ==="
-          cat /tmp/dw_project/android/build.gradle
+
+          # 2. Forțăm Kotlin 1.9.10 prin gradle.properties (cel mai fiabil mod)
+          echo "" >> /tmp/dw_project/android/gradle.properties
+          echo "kotlin.version=1.9.10" >> /tmp/dw_project/android/gradle.properties
+
+          # 3. Patch orice format de kotlin_version din build.gradle
+          sed -i "s/kotlin_version = '1\.[0-9][^']*'/kotlin_version = '1.9.10'/g" \
+            /tmp/dw_project/android/build.gradle 2>/dev/null || true
+          sed -i 's/kotlin_version = "1\.[0-9][^"]*"/kotlin_version = "1.9.10"/g' \
+            /tmp/dw_project/android/build.gradle 2>/dev/null || true
+
+          # 4. Forțăm stdlib-ul Kotlin prin resolution strategy
+          echo "" >> /tmp/dw_project/android/app/build.gradle
+          echo "configurations.all {" >> /tmp/dw_project/android/app/build.gradle
+          echo "    resolutionStrategy {" >> /tmp/dw_project/android/app/build.gradle
+          echo "        force 'org.jetbrains.kotlin:kotlin-stdlib:1.9.10'" >> /tmp/dw_project/android/app/build.gradle
+          echo "        force 'org.jetbrains.kotlin:kotlin-stdlib-jdk7:1.9.10'" >> /tmp/dw_project/android/app/build.gradle
+          echo "        force 'org.jetbrains.kotlin:kotlin-stdlib-jdk8:1.9.10'" >> /tmp/dw_project/android/app/build.gradle
+          echo "    }" >> /tmp/dw_project/android/app/build.gradle
+          echo "}" >> /tmp/dw_project/android/app/build.gradle
+
+          echo "=== gradle.properties ==="
+          cat /tmp/dw_project/android/gradle.properties
+          echo "=== app/build.gradle (final 10 linii) ==="
+          tail -15 /tmp/dw_project/android/app/build.gradle
 
       - name: Flutter pub get
         run: cd /tmp/dw_project && flutter pub get
