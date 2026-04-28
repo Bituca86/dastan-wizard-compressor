@@ -28,72 +28,22 @@ jobs:
           cache: true
 
       - name: Create Flutter project
-        run: |
-          flutter create \
-            --project-name dastan_wizard_compressor \
-            --org com.dastanwizard \
-            --platforms android \
-            /tmp/dw_project
+        run: flutter create --project-name dastan_wizard_compressor --org com.dastanwizard --platforms android /tmp/dw_project
 
       - name: Copy source files
         run: |
           cp dw_flutter/lib/main.dart /tmp/dw_project/lib/main.dart
           cp dw_flutter/pubspec.yaml /tmp/dw_project/pubspec.yaml
-          cp dw_flutter/android/app/src/main/AndroidManifest.xml \
-             /tmp/dw_project/android/app/src/main/AndroidManifest.xml
-          cat > /tmp/dw_project/android/app/build.gradle << 'ENDGRADLE'
-plugins {
-    id "com.android.application"
-    id "kotlin-android"
-    id "dev.flutter.flutter-gradle-plugin"
-}
-android {
-    namespace "com.dastanwizard.compressor"
-    compileSdk flutter.compileSdkVersion
-    ndkVersion "26.1.10909125"
-    compileOptions {
-        sourceCompatibility JavaVersion.VERSION_1_8
-        targetCompatibility JavaVersion.VERSION_1_8
-    }
-    kotlinOptions {
-        jvmTarget = '1.8'
-    }
-    defaultConfig {
-        applicationId "com.dastanwizard.compressor"
-        minSdk 24
-        targetSdk flutter.targetSdkVersion
-        versionCode flutter.versionCode
-        versionName flutter.versionName
-        multiDexEnabled true
-    }
-    buildTypes {
-        release {
-            signingConfig signingConfigs.debug
-            minifyEnabled false
-            shrinkResources false
-        }
-    }
-    packagingOptions {
-        jniLibs {
-            pickFirsts += ['**/*.so']
-        }
-    }
-}
-flutter {
-    source '../..'
-}
-dependencies {
-    implementation 'androidx.multidex:multidex:2.0.1'
-}
-ENDGRADLE
+          cp dw_flutter/android/app/src/main/AndroidManifest.xml /tmp/dw_project/android/app/src/main/AndroidManifest.xml
+
+      - name: Patch Android minSdk to 24
+        run: sed -i 's/flutter\.minSdkVersion/24/g' /tmp/dw_project/android/app/build.gradle
 
       - name: Flutter pub get
         run: cd /tmp/dw_project && flutter pub get
 
       - name: Build APK
-        run: |
-          cd /tmp/dw_project
-          flutter build apk --release --target-platform android-arm64 --no-shrink
+        run: cd /tmp/dw_project && flutter build apk --release --target-platform android-arm64 --no-shrink
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
