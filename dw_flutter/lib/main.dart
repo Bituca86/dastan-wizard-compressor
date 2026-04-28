@@ -98,11 +98,13 @@ class _HomeState extends State<HomeScreen> {
   String _resolution = 'original';
 
   VideoQuality get _vq {
+    // LowQuality (~1.5 Mbps) și MediumQuality (~2.5 Mbps) sunt singurele
+    // care garantează reducere pentru videouri cu bitrate ridicat
     switch (_quality.round()) {
       case 0: return VideoQuality.LowQuality;
-      case 1: return VideoQuality.MediumQuality;
-      case 2: return VideoQuality.Res1280x720Quality;
-      default: return VideoQuality.HighestQuality;
+      case 1: return VideoQuality.LowQuality;
+      case 2: return VideoQuality.MediumQuality;
+      default: return VideoQuality.MediumQuality;
     }
   }
 
@@ -194,6 +196,26 @@ class _HomeState extends State<HomeScreen> {
     });
 
     try {
+      // Calculăm rezoluția target (nu urcăm niciodată peste original)
+      final srcW = job.w > 0 ? job.w : 1280;
+      final srcH = job.h > 0 ? job.h : 720;
+
+      // Target dimensions — maximum 720p pentru calitate 0-2, 1080p pentru 3
+      final maxH = _quality.round() >= 3 ? 1080 : 720;
+      int targetW = srcW;
+      int targetH = srcH;
+      if (srcH > maxH) {
+        final scale = maxH / srcH;
+        targetH = maxH;
+        targetW = (srcW * scale).round();
+        // Ensure even numbers (required by most codecs)
+        targetW = targetW % 2 == 0 ? targetW : targetW - 1;
+      }
+      // Never upscale
+      if (targetH > srcH) { targetW = srcW; targetH = srcH; }
+
+      _log_('  Rezoluție: ${srcW}x${srcH} → ${targetW}x${targetH}');
+
       final info = await VideoCompress.compressVideo(
         job.path,
         quality: _vq,
@@ -207,15 +229,28 @@ class _HomeState extends State<HomeScreen> {
       if (info?.path == null) throw Exception('Compresie eșuată — output null');
 
       final outFile = File(info!.path!);
-      final outSize = await outFile.length();
+      int outSize = await outFile.length();
+      String finalPath = info.path!;
+
+      // Dacă outputul e mai mare decât inputul → videoul era deja comprimat
+      // Copiem originalul ca output (nu putem comprima mai mult fără pierderi)
+      if (outSize >= job.size) {
+        _log_('  ⚠ Videoul era deja optimizat (bitrate scăzut). Output = original.');
+        await outFile.delete();
+        final dir = await getTemporaryDirectory();
+        finalPath = '${dir.path}/DW_orig_${DateTime.now().millisecondsSinceEpoch}.mp4';
+        await File(job.path).copy(finalPath);
+        outSize = job.size;
+      }
+
       final saved = ((job.size - outSize) / job.size * 100).toStringAsFixed(1);
-      final ratio = (job.size / outSize).toStringAsFixed(2);
+      final ratio = outSize > 0 ? (job.size / outSize).toStringAsFixed(2) : '1.0';
 
       _log_('  ✓ ${_fmtSize(job.size)} → ${_fmtSize(outSize)} · $saved% economisit · ${ratio}×');
 
       setState(() {
         job.status = JobStatus.done;
-        job.outputPath = info.path;
+        job.outputPath = finalPath;
         job.outputSize = outSize;
         job.progress = 100;
       });
