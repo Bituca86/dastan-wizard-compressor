@@ -36,10 +36,14 @@ jobs:
           cp dw_flutter/pubspec.yaml /tmp/dw_project/pubspec.yaml
           cp dw_flutter/android/app/src/main/AndroidManifest.xml /tmp/dw_project/android/app/src/main/AndroidManifest.xml
 
-      - name: Patch Android minSdk
+      - name: Patch Android config
         run: |
           find /tmp/dw_project/android -name "build.gradle" -path "*/app/*" \
             -exec sed -i 's/flutter\.minSdkVersion/24/g' {} \;
+          sed -i "s/ext\.kotlin_version = '[^']*'/ext.kotlin_version = '1.9.10'/" \
+            /tmp/dw_project/android/build.gradle || true
+          echo "=== android/build.gradle ==="
+          cat /tmp/dw_project/android/build.gradle
 
       - name: Flutter pub get
         run: cd /tmp/dw_project && flutter pub get
