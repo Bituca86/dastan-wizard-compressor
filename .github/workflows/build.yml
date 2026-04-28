@@ -32,9 +32,9 @@ jobs:
 
       - name: Copy source files
         run: |
-          cp lib/main.dart /tmp/dw_project/lib/main.dart
-          cp pubspec.yaml /tmp/dw_project/pubspec.yaml
-          cp android/app/src/main/AndroidManifest.xml /tmp/dw_project/android/app/src/main/AndroidManifest.xml
+          cp dw_flutter/lib/main.dart /tmp/dw_project/lib/main.dart
+          cp dw_flutter/pubspec.yaml /tmp/dw_project/pubspec.yaml
+          cp dw_flutter/android/app/src/main/AndroidManifest.xml /tmp/dw_project/android/app/src/main/AndroidManifest.xml
           cat > /tmp/dw_project/android/app/build.gradle << 'GRADLE'
           plugins {
               id "com.android.application"
