@@ -38,28 +38,27 @@ jobs:
 
       - name: Patch Android config
         run: |
-          echo "=== BEFORE PATCH: android/build.gradle ==="
-          cat /tmp/dw_project/android/build.gradle
-
-          # Fix minSdk
           find /tmp/dw_project/android -name "build.gradle" -path "*/app/*" \
             -exec sed -i 's/flutter\.minSdkVersion/24/g' {} \;
 
-          # Fix Kotlin version - acoperim toate formatele posibile
-          GRADLE=/tmp/dw_project/android/build.gradle
+          # Add -Xskip-metadata-version-check to ALL Kotlin compile tasks
+          # This lets Kotlin 1.7.x compile sources compiled with Kotlin 1.9.x
+          cat >> /tmp/dw_project/android/build.gradle << 'GRADLE_PATCH'
 
-          # Format 1: ext.kotlin_version = '1.x.x'
-          sed -i "s/ext\.kotlin_version = '[^']*'/ext.kotlin_version = '1.9.10'/" "$GRADLE" || true
-
-          # Format 2: classpath "org.jetbrains.kotlin:kotlin-gradle-plugin:x.x.x"
-          sed -i 's/org\.jetbrains\.kotlin:kotlin-gradle-plugin:[0-9][0-9.]*/org.jetbrains.kotlin:kotlin-gradle-plugin:1.9.10/g' "$GRADLE" || true
-
-          # Format 3: dacă nu există deloc, adaugă ext.kotlin_version în buildscript
-          if ! grep -q "kotlin_version\|kotlin-gradle-plugin" "$GRADLE" 2>/dev/null; then
-            sed -i 's/^buildscript {/buildscript {\n    ext.kotlin_version = "1.9.10"/' "$GRADLE" || true
-          fi
-
-          echo "=== AFTER PATCH: android/build.gradle ==="
+subprojects {
+    afterEvaluate { project ->
+        project.tasks.withType(
+            org.jetbrains.kotlin.gradle.tasks.KotlinCompile.class
+        ).configureEach {
+            kotlinOptions {
+                freeCompilerArgs += ['-Xskip-metadata-version-check']
+                jvmTarget = '1.8'
+            }
+        }
+    }
+}
+GRADLE_PATCH
+          echo "=== android/build.gradle ==="
           cat /tmp/dw_project/android/build.gradle
 
       - name: Flutter pub get
