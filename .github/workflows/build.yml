@@ -1,4 +1,4 @@
-yamlname: Dastan Wizard Build APK
+name: Build Dastan Wizard APK
 
 on:
   push:
@@ -9,71 +9,83 @@ jobs:
   build-apk:
     runs-on: ubuntu-latest
     timeout-minutes: 45
+
     steps:
-      - name: Checkout repo
+      - name: Checkout
         uses: actions/checkout@v4
 
       - name: Setup Java 17
         uses: actions/setup-java@v4
         with:
-          distribution: 'zulu'
+          distribution: zulu
           java-version: '17'
 
       - name: Setup Flutter
         uses: subosito/flutter-action@v2
         with:
           flutter-version: '3.22.0'
-          channel: 'stable'
+          channel: stable
           cache: true
 
       - name: Create Flutter project
         run: |
-          flutter create --project-name dastan_wizard_compressor --org com.dastanwizard --platforms android /tmp/dw_project
+          flutter create \
+            --project-name dastan_wizard_compressor \
+            --org com.dastanwizard \
+            --platforms android \
+            /tmp/dw_project
 
       - name: Copy source files
         run: |
           cp dw_flutter/lib/main.dart /tmp/dw_project/lib/main.dart
           cp dw_flutter/pubspec.yaml /tmp/dw_project/pubspec.yaml
-          cp dw_flutter/android/app/src/main/AndroidManifest.xml /tmp/dw_project/android/app/src/main/AndroidManifest.xml
-          cat > /tmp/dw_project/android/app/build.gradle << 'GRADLE'
-          plugins {
-              id "com.android.application"
-              id "kotlin-android"
-              id "dev.flutter.flutter-gradle-plugin"
-          }
-          android {
-              namespace "com.dastanwizard.compressor"
-              compileSdk flutter.compileSdkVersion
-              ndkVersion "26.1.10909125"
-              compileOptions {
-                  sourceCompatibility JavaVersion.VERSION_1_8
-                  targetCompatibility JavaVersion.VERSION_1_8
-              }
-              kotlinOptions { jvmTarget = '1.8' }
-              defaultConfig {
-                  applicationId "com.dastanwizard.compressor"
-                  minSdk 24
-                  targetSdk flutter.targetSdkVersion
-                  versionCode flutter.versionCode
-                  versionName flutter.versionName
-                  multiDexEnabled true
-              }
-              buildTypes {
-                  release {
-                      signingConfig signingConfigs.debug
-                      minifyEnabled false
-                      shrinkResources false
-                  }
-              }
-              packagingOptions {
-                  jniLibs { pickFirsts += ['**/*.so'] }
-              }
-          }
-          flutter { source '../..' }
-          dependencies {
-              implementation 'androidx.multidex:multidex:2.0.1'
-          }
-          GRADLE
+          cp dw_flutter/android/app/src/main/AndroidManifest.xml \
+             /tmp/dw_project/android/app/src/main/AndroidManifest.xml
+          cat > /tmp/dw_project/android/app/build.gradle << 'ENDGRADLE'
+plugins {
+    id "com.android.application"
+    id "kotlin-android"
+    id "dev.flutter.flutter-gradle-plugin"
+}
+android {
+    namespace "com.dastanwizard.compressor"
+    compileSdk flutter.compileSdkVersion
+    ndkVersion "26.1.10909125"
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_1_8
+        targetCompatibility JavaVersion.VERSION_1_8
+    }
+    kotlinOptions {
+        jvmTarget = '1.8'
+    }
+    defaultConfig {
+        applicationId "com.dastanwizard.compressor"
+        minSdk 24
+        targetSdk flutter.targetSdkVersion
+        versionCode flutter.versionCode
+        versionName flutter.versionName
+        multiDexEnabled true
+    }
+    buildTypes {
+        release {
+            signingConfig signingConfigs.debug
+            minifyEnabled false
+            shrinkResources false
+        }
+    }
+    packagingOptions {
+        jniLibs {
+            pickFirsts += ['**/*.so']
+        }
+    }
+}
+flutter {
+    source '../..'
+}
+dependencies {
+    implementation 'androidx.multidex:multidex:2.0.1'
+}
+ENDGRADLE
 
       - name: Flutter pub get
         run: cd /tmp/dw_project && flutter pub get
@@ -86,7 +98,7 @@ jobs:
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: DastanWizard-VideoCompressor-APK
+          name: DastanWizard-APK
           path: /tmp/dw_project/build/app/outputs/flutter-apk/app-release.apk
           retention-days: 30
           if-no-files-found: error
