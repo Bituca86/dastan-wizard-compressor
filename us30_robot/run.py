@@ -19,6 +19,50 @@ from us30bot.settings import Settings
 from us30bot.trader import Trader
 
 
+class _Tee:
+    """Duplicate console output into state/server.log (kept even if the window closes)."""
+
+    def __init__(self, stream, fh):
+        self.stream, self.fh = stream, fh
+
+    def write(self, data):
+        try:
+            if self.stream:
+                self.stream.write(data)
+        except Exception:
+            pass
+        self.fh.write(data)
+        self.fh.flush()
+
+    def flush(self):
+        try:
+            if self.stream:
+                self.stream.flush()
+        except Exception:
+            pass
+
+
+def setup_logging(state_dir: str) -> None:
+    import atexit
+    import threading
+    import traceback
+    from datetime import datetime
+    os.makedirs(state_dir, exist_ok=True)
+    path = os.path.join(state_dir, "server.log")
+    if os.path.exists(path) and os.path.getsize(path) > 5_000_000:
+        os.replace(path, path + ".old")
+    fh = open(path, "a", encoding="utf-8")
+    sys.stdout = _Tee(sys.stdout, fh)
+    sys.stderr = _Tee(sys.stderr, fh)
+    print(f"\n===== {datetime.now():%Y-%m-%d %H:%M:%S} pornire server (pid {os.getpid()}) =====")
+
+    def log_exc(exc_type, exc, tb):
+        print(f"[{datetime.now():%H:%M:%S}] EROARE NETRATATĂ:\n" + "".join(traceback.format_exception(exc_type, exc, tb)))
+    sys.excepthook = log_exc
+    threading.excepthook = lambda a: log_exc(a.exc_type, a.exc_value, a.exc_traceback)
+    atexit.register(lambda: print(f"[{datetime.now():%H:%M:%S}] proces Python oprit normal"))
+
+
 def build(a, paper: bool) -> Trader:
     eng = Engine.load(a.state, EngineConfig(explore=a.explore))
     modes = ModeController(a.mode, ModeConfig(), always_online=paper and a.mode != "ROBOT")
@@ -83,6 +127,7 @@ def main() -> int:
         return 0
 
     if a.cmd == "serve":
+        setup_logging(a.state)
         from us30bot.server import Bridge, serve
         from us30bot.telegram import TelegramBot, load_config
         mode_file = os.path.join(a.state, "mode.txt")

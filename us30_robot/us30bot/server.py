@@ -62,6 +62,8 @@ class Bridge:
             self.t.warmup = False
             self.t.drain()
             self.t.eng.open_signal = None  # warm-up signals are virtual only
+            print(f"[{datetime.now():%H:%M:%S}] warm-up: {n} bare noi, eșantioane învățare "
+                  f"{self.t.eng.learner.updates}")
             return {"ok": True, "bars": n, "learning_samples": self.t.eng.learner.updates}
 
     def bar(self, d: dict) -> dict:
@@ -73,6 +75,8 @@ class Bridge:
             self._n += 1
             if self._n % self.save_every == 0:
                 self.t.eng.save(self.state_dir)
+                print(f"[{datetime.now():%H:%M:%S}] bară {b.time:%H:%M} UTC · stare salvată · "
+                      f"semnale {len(self.t.eng.journal)} · învățare {self.t.eng.learner.updates}")
             return {"actions": acts}
 
     def save(self) -> None:
@@ -132,6 +136,7 @@ def make_handler(br: Bridge, token: Optional[str]):
                 if path == "/warmup":
                     return self._send(200, br.warmup(body.get("bars", [])))
                 if path == "/shutdown":
+                    print(f"[{datetime.now():%H:%M:%S}] oprire cerută de cBot – salvez starea")
                     br.save()
                     self._send(200, {"ok": True, "saved": True})
                     if br.on_shutdown:
@@ -155,6 +160,8 @@ def make_handler(br: Bridge, token: Optional[str]):
                         return self._send(200, {"ok": True})
                 self._send(404, {"error": "not found"})
             except Exception as e:  # never crash the bridge on a bad request
+                import traceback
+                print(f"[{datetime.now():%H:%M:%S}] eroare la {path}: {e}\n{traceback.format_exc()}")
                 self._send(400, {"error": str(e)})
     return H
 
