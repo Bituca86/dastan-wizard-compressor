@@ -40,7 +40,7 @@ class Bridge:
     def __init__(self, trader: Trader, state_dir: str, save_every: int = 30,
                  settings: Optional[Settings] = None):
         self.t = trader
-        self.settings = settings or Settings(trader.modes, trader.risk)
+        self.settings = settings or Settings(trader.modes, trader.risk, engine_cfg=trader.eng.cfg)
         self.lock = threading.Lock()
         self.state_dir = state_dir
         self.save_every = save_every
@@ -119,7 +119,7 @@ def make_handler(br: Bridge, token: Optional[str]):
             if path == "/settings":
                 with br.lock:
                     return self._send(200, {"values": br.settings.get(),
-                                            "help": {k: v[5] for k, v in SPEC.items()}})
+                                            "help": {k: SPEC[k][5] for k in br.settings.get()}})
             if path == "/actions":
                 with br.lock:
                     return self._send(200, {"actions": br.t.drain(), "mode": br.t.modes.effective})

@@ -68,7 +68,7 @@ def build(a, paper: bool) -> Trader:
     modes = ModeController(a.mode, ModeConfig(), always_online=paper and a.mode != "ROBOT")
     risk = RiskManager(RiskConfig(risk_pct=a.risk, leverage=a.leverage))
     tr = Trader(eng, modes, risk, paper=paper, balance=a.balance)
-    tr.settings = Settings(modes, risk, os.path.join(a.state, "settings.json"))
+    tr.settings = Settings(modes, risk, os.path.join(a.state, "settings.json"), engine_cfg=eng.cfg)
     tr.settings.load()  # values changed from dashboard / Telegram survive restarts
     if "--risk" in sys.argv:
         tr.settings.set("risk_pct", a.risk)

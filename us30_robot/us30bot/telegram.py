@@ -24,7 +24,7 @@ API = "https://api.telegram.org/bot{token}/{method}"
 
 HELP = ("Comenzi:\n/status – situația curentă\n/mod MANUAL|HIBRID|AUTO|ROBOT\n/online – sunt aici\n"
         "/risc 1.0 – risc % pe tranzacție\n/prag 0.60 0.40 – HIBRID: P și expectanță pt. execuție automată\n"
-        "/robot 0.55 0.30 – praguri ROBOT\n/setari – toate setările\n/set <cheie> <valoare>")
+        "/robot 0.55 0.50 – praguri ROBOT\n/setari – toate setările\n/set <cheie> <valoare>")
 
 
 def http_transport(token: str) -> Callable[[str, dict, float], dict]:

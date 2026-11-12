@@ -13,6 +13,8 @@ from .risk import RiskManager
 
 # key -> (object, attribute, min, max, type, description)
 SPEC: Dict[str, Tuple[str, str, float, float, type, str]] = {
+    "min_prob": ("engine", "min_prob", 0.3, 0.95, float, "semnal: probabilitate minimă de succes"),
+    "min_expectancy_r": ("engine", "min_expectancy_r", 0.0, 3.0, float, "semnal: expectanță minimă (R, după spread)"),
     "risk_pct": ("risk", "risk_pct", 0.05, 3.0, float, "risc % din sold pe tranzacție"),
     "max_daily_loss_pct": ("risk", "max_daily_loss_pct", 0.5, 10.0, float, "oprire la pierdere zilnică %"),
     "max_trades_day": ("risk", "max_trades_day", 1, 50, int, "maxim tranzacții pe zi"),
@@ -30,21 +32,28 @@ SPEC: Dict[str, Tuple[str, str, float, float, type, str]] = {
 
 
 class Settings:
-    def __init__(self, modes: ModeController, risk: RiskManager, path: str = ""):
+    def __init__(self, modes: ModeController, risk: RiskManager, path: str = "", engine_cfg=None):
         self.modes, self.risk, self.path = modes, risk, path
+        self.engine_cfg = engine_cfg
 
     def _obj(self, which: str):
+        if which == "engine":
+            return self.engine_cfg
         return self.modes.cfg if which == "mode" else self.risk.cfg
+
+    def _keys(self):
+        return [k for k in SPEC if SPEC[k][0] != "engine" or self.engine_cfg is not None]
 
     def get(self) -> Dict[str, object]:
         out = {}
-        for k, (which, attr, *_rest) in SPEC.items():
+        for k in self._keys():
+            which, attr = SPEC[k][0], SPEC[k][1]
             v = getattr(self._obj(which), attr)
             out[k] = v / 60 if k == "offline_after_min" else v
         return out
 
     def set(self, key: str, value) -> object:
-        if key not in SPEC:
+        if key not in self._keys():
             raise KeyError(f"setare necunoscută: {key}")
         which, attr, lo, hi, typ, _ = SPEC[key]
         if typ is bool:
@@ -64,7 +73,7 @@ class Settings:
 
     def describe(self) -> str:
         cur = self.get()
-        return "\n".join(f"{k} = {cur[k]}  ({SPEC[k][5]})" for k in SPEC)
+        return "\n".join(f"{k} = {cur[k]}  ({SPEC[k][5]})" for k in self._keys())
 
     def save(self) -> None:
         if not self.path:
@@ -79,7 +88,7 @@ class Settings:
                 data = json.load(fh)
             path, self.path = self.path, ""  # don't rewrite while loading
             for k, v in data.items():
-                if k in SPEC:
+                if k in self._keys():
                     try:
                         self.set(k, v)
                     except (ValueError, KeyError):

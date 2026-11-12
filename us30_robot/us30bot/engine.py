@@ -19,8 +19,9 @@ from .patterns import detect_all
 @dataclass
 class EngineConfig:
     htf_minutes: int = 15
-    min_prob: float = 0.45
-    min_expectancy_r: float = 0.10
+    # chosen on Jun-Aug 2026 ICMarkets data, validated on Sep-Nov (see README)
+    min_prob: float = 0.50
+    min_expectancy_r: float = 0.30
     min_cell_samples: float = 0.0  # 0 = allow trading from family/global prior
     explore: bool = False  # Thompson sampling (paper trading accelerates learning)
     cooldown_bars: int = 5  # same pattern/direction re-fire suppression

@@ -26,7 +26,7 @@ class ModeConfig:
     approval_timeout_bars: int = 3
     approval_max_drift_r: float = 0.3  # reject approval if price moved > 0.3R from entry
     robot_min_prob: float = 0.55
-    robot_min_exp: float = 0.30
+    robot_min_exp: float = 0.50  # stricter than the normal 0.30 filter
     robot_risk_factor: float = 0.5
     offline_after_sec: float = 20 * 60
     auto_robot_offline: bool = True  # switch to ROBOT when you are not online

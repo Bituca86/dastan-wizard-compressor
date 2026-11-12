@@ -33,7 +33,7 @@ Pornește de la cheat-sheet-ul **„Institutional Price Action & Liquidity – M
 | **MANUAL** | Doar propune (grafic + dashboard + sunet). Execuți tu. Robotul învață oricum. |
 | **HIBRID** | Semnalele cu încredere mare (P ≥ 60% și expectanță ≥ 0,4R) se execută singure; restul așteaptă **✔ Aprob / ✖ Refuz** (expiră în 3 min sau dacă prețul a plecat > 0,3R). |
 | **AUTO** | Execută toate semnalele care trec filtrele normale. |
-| **ROBOT** | Pilot automat când nu ești online: filtre stricte (P ≥ 55%, ≥ 0,3R), **risc la jumătate**, oprire la −2%/zi sau 3 pierderi la rând. |
+| **ROBOT** | Pilot automat când nu ești online: filtre stricte (P ≥ 55%, ≥ 0,5R), **risc la jumătate**, oprire la −2%/zi sau 3 pierderi la rând. |
 
 **Prezența** se detectează automat: mișcarea mouse-ului pe grafic, butoanele din cBot sau dashboard-ul.
 După 20 de minute fără prezență, MANUAL/HIBRID/AUTO trec automat în **ROBOT**.
@@ -84,7 +84,7 @@ Backtestul pre-antrenează starea din `state/`, pe care `serve` o folosește apo
 
 Primești fiecare semnal cu explicația, butoane **✔ Aprob / ✖ Refuz** în HIBRID, execuțiile, rezultatul cu verdictul
 (mesajul inițial se actualizează), închiderile cu profit/pierdere, oprirea la limita zilnică și trecerea automată în ROBOT.
-Comenzi: `/status`, `/mod AUTO`, `/online`, `/risc 1.0`, `/prag 0.60 0.40`, `/robot 0.55 0.30`, `/setari`, `/set <cheie> <valoare>`.
+Comenzi: `/status`, `/mod AUTO`, `/online`, `/risc 1.0`, `/prag 0.60 0.40`, `/robot 0.55 0.50`, `/setari`, `/set <cheie> <valoare>`.
 Doar chat-ul tău e ascultat. Orice mesaj sau buton apăsat te marchează „online”.
 Pentru a primi doar semnalele executate sau de aprobat: `serve --tg-only-actionable`.
 
@@ -96,7 +96,8 @@ se păstrează la repornire și au limite de siguranță (ex. risc 0,05–3%):
 | `risk_pct` | 1.0 | risc % pe tranzacție |
 | `hybrid_auto_prob` / `hybrid_auto_exp` | 0.60 / 0.40 | HIBRID: prag pentru execuție fără aprobare |
 | `approval_timeout_bars` | 3 | minute pentru aprobare |
-| `robot_min_prob` / `robot_min_exp` | 0.55 / 0.30 | praguri ROBOT |
+| `min_prob` / `min_expectancy_r` | 0.50 / 0.30 | filtrul de bază pentru orice semnal |
+| `robot_min_prob` / `robot_min_exp` | 0.55 / 0.50 | praguri ROBOT |
 | `robot_risk_factor` | 0.5 | ROBOT riscă jumătate |
 | `max_daily_loss_pct` / `max_consecutive_losses` / `max_trades_day` | 2 / 3 / 10 | siguranțe zilnice |
 | `offline_after_min` / `auto_robot_offline` | 20 / da | trecerea automată în ROBOT |
@@ -134,6 +135,21 @@ Pattern-urile subiective sunt traduse în reguli euristice. **Learner-ul decide*
 | **Uitare exponențială** | se adaptează la schimbări de regim |
 | **Post-mortem → acțiune** | „stop vânat apoi ținta atinsă” lărgește stop-ul acelei celule |
 | **Thompson sampling** (`--explore`) | explorare controlată în paper trading |
+
+## Backtest pe date reale ICMarkets (iun–nov 2026, 150.860 bare M1)
+
+Robotul învață online (fiecare decizie folosește doar trecutul), cu spread 0,7/1,2 inclus.
+Pragurile au fost alese **doar pe iun–aug** și verificate pe **sep–nov**, date nefolosite la alegere:
+
+| Configurație | iun–aug | sep–nov |
+|---|---|---|
+| prag vechi (P≥45%, ≥0,1R) | −49R, PF 0,85, DD 58R | +63R, PF 1,18 |
+| **actual (P≥50%, ≥0,3R)** | **+26R, PF 1,36, DD 15R** (134 tranz.) | **+36R, PF 1,35, DD 9R** (201 tranz.) |
+| P≥55%, ≥0,5R | +3R, PF 1,20 (28 tranz.) | +21R, PF 2,23 (40 tranz.) |
+
+Toate detecțiile brute, nefiltrate, au în medie −0,07R după spread. Pattern-urile singure nu au edge;
+avantajul vine din filtrarea matricei (context + istoricul fiecărei celule). 5 luni înseamnă un eșantion mic:
+**rezultatele trecute nu garantează nimic**, testează pe demo înainte de bani reali.
 
 ## Teste
 

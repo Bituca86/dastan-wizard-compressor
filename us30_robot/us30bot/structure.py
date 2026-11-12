@@ -77,6 +77,8 @@ class ZigZag:
                 label = "HL" if price > prev.price else "LL"
         sw = Swing(index, price, kind, label)
         self.swings.append(sw)
+        if len(self.swings) > 600:  # bounded memory/CPU for weeks of live running
+            del self.swings[:100]
         return sw
 
     # helpers -------------------------------------------------------------
@@ -84,8 +86,12 @@ class ZigZag:
         return self.swings[-n:] if len(self.swings) >= n else []
 
     def last_of(self, kind: str, skip: int = 0) -> Optional[Swing]:
-        found = [s for s in reversed(self.swings) if s.kind == kind]
-        return found[skip] if len(found) > skip else None
+        for s in reversed(self.swings):
+            if s.kind == kind:
+                if skip == 0:
+                    return s
+                skip -= 1
+        return None
 
 
 class StructureTracker:
