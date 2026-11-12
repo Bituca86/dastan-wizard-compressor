@@ -102,53 +102,100 @@ def _liquidity_target(st: MarketState, direction: str, entry: float, risk: float
 
 
 # ---------------------------------------------------------------------------
-# 1-6  Quasimodo (QM) family
+# 1-7  Quasimodo (QM) family - setups are remembered and traded on retest
 # ---------------------------------------------------------------------------
-@detector(1, 2, 6)
+def _sweeps_liquidity(st: MarketState, sw, side_high: bool) -> bool:
+    levels = st.liquidity_levels(SELL if side_high else BUY)
+    tol = 0.1 * st.atr_v
+    lv = [p for name, p in levels if name not in ("range_high", "range_low")]
+    return any((sw.price > p + tol) if side_high else (sw.price < p - tol) for p in lv)
+
+
+@detector(1, 2, 3, 4, 5, 6, 7)
 def quasimodo(st: MarketState) -> List[Detection]:
-    """Bearish QM: H(QML) -> L -> HH -> LL(close below L). Sell on retest of QML.
-    Bullish QM mirrored. Quick vs late retest by bars elapsed since the LL/HH."""
-    out = []
-    sw = st.zz.last(5)
-    if len(sw) < 5:
-        return out
-    b = st.bar
-    # last 4 confirmed swings must form H,L,HH,LL (or mirror); price is now pulling back
-    seq = sw[-4:]
-    kinds = "".join(s.kind for s in seq)
-    tol = 0.3 * st.atr_v
-    if kinds == "HLHL":
-        h1, l1, hh, ll = seq
-        if hh.price > h1.price and ll.price < l1.price:  # bearish QM
-            qml = h1.price
-            if b.high >= qml - tol and b.close < qml and b.close < b.open:
-                age = st.i - ll.index
-                pid = 1 if age <= 20 else 2
-                d = _mk(st, pid, SELL, max(b.high, qml),
-                        f"QM bearish: HH {hh.price:.1f} urmat de LL sub {l1.price:.1f}; "
-                        f"retest QML {qml:.1f} cu respingere", qm_age=age)
+    """Bearish QM: H1 -> L1 -> HH -> LL (below L1). QML = H1. Sell the retest of QML.
+    Variants: 1 quick retest (<=20 bars), 2 late retest, 3 second touch (re-entry),
+    4 QMTR (QML broken then engulfed back), 5 continuation QM (H1 was a LH, i.e. QM
+    inside a downtrend), 6 reversal QM (the HH swept liquidity), 7 DM shadow (retest
+    wick pierces QML and closes back). Bullish mirrored."""
+    out: List[Detection] = []
+    setups = st.memory.setdefault("qm", [])
+    sw = st.zz.last(4)
+    if len(sw) == 4:
+        kinds = "".join(s.kind for s in sw)
+        if kinds in ("HLHL", "LHLH"):
+            bear = kinds == "HLHL"
+            e1, m1, ext, brk = sw
+            valid = (ext.price > e1.price and brk.price < m1.price) if bear else \
+                    (ext.price < e1.price and brk.price > m1.price)
+            if valid and not any(x["ext"] == ext.index for x in setups):
+                setups.append({"dir": SELL if bear else BUY, "qml": e1.price, "ext": ext.index,
+                               "ext_p": ext.price, "start": brk.index, "touch": 0, "broken": None,
+                               "cont": e1.label == ("LH" if bear else "HL"),
+                               "sweep": _sweeps_liquidity(st, ext, bear)})
+    b, atr = st.bar, st.atr_v
+    tol = 0.3 * atr
+    keep = []
+    for q in setups:
+        bear = q["dir"] == SELL
+        sg = 1 if bear else -1
+        qml, age = q["qml"], st.i - q["start"]
+        if age > 180 or sg * (b.close - q["ext_p"]) > 0:
+            continue  # expired or invalidated beyond the extreme
+        if q["broken"] is None and sg * (b.close - qml) > 0.25 * atr:
+            q["broken"] = st.i
+        if q["broken"] is not None:
+            if st.i - q["broken"] > 15:
+                continue
+            p = st.prev
+            engulf = (b.close < p.open and b.open >= p.close and p.bullish and b.close < qml) if bear else \
+                     (b.close > p.open and b.open <= p.close and not p.bullish and b.close > qml)
+            if engulf:
+                d = _mk(st, 4, q["dir"], b.high if bear else b.low,
+                        f"QMTR: QML {qml:.1f} a fost depășit (capcană), apoi lumânare engulfing înapoi "
+                        f"-> QM ignorat devine intrare în direcția inițială", qm=1.0)
                 if d: out.append(d)
-    if kinds == "LHLH":
-        l1, h1, ll, hh = seq
-        if ll.price < l1.price and hh.price > h1.price:  # bullish QM
-            qml = l1.price
-            if b.low <= qml + tol and b.close > qml and b.close > b.open:
-                age = st.i - hh.index
+                continue
+            keep.append(q)
+            continue
+        touch = (b.high >= qml - tol and b.close < qml and not b.bullish) if bear else \
+                (b.low <= qml + tol and b.close > qml and b.bullish)
+        if touch and age >= 1:
+            q["touch"] += 1
+            pierce = (b.high - qml) if bear else (qml - b.low)
+            if q["touch"] >= 2:
+                pid = 3
+            elif q["sweep"]:
+                pid = 6
+            elif q["cont"]:
+                pid = 5
+            elif pierce > 0.2 * atr:
+                pid = 7
+            else:
                 pid = 1 if age <= 20 else 2
-                d = _mk(st, pid, BUY, min(b.low, qml),
-                        f"QM bullish: LL {ll.price:.1f} urmat de HH peste {h1.price:.1f}; "
-                        f"retest QML {qml:.1f} cu respingere", qm_age=age)
-                if d: out.append(d)
+            what = {1: "retest rapid", 2: "retest târziu", 3: "re-intrare (a doua atingere)",
+                    5: "QM de continuare în trend", 6: "QM de inversare după vânarea lichidității",
+                    7: "DM shadow: fitilul străpunge QML și închide înapoi"}[pid]
+            ext_txt = "HH" if bear else "LL"
+            d = _mk(st, pid, q["dir"], max(b.high, qml) if bear else min(b.low, qml),
+                    f"QM {'bearish' if bear else 'bullish'}: {ext_txt} {q['ext_p']:.1f} urmat de spargerea "
+                    f"structurii; {what} la QML {qml:.1f}", qm=1.0, qm_age=float(age))
+            if d: out.append(d)
+            if q["touch"] >= 2:
+                continue
+        keep.append(q)
+    st.memory["qm"] = keep[-10:]
     return out
 
 
 # ---------------------------------------------------------------------------
 # 39-44 / 50-51 / 54-55  Liquidity sweeps, SFP, session & PD levels, traps, springs
 # ---------------------------------------------------------------------------
-_LEVEL_PID = {"PDH": 44, "PDL": 44, "EQH": 37, "EQL": 38, "swing": 40}
+_LEVEL_PID = {"PDH": 44, "PDL": 44, "PWH": 45, "PWL": 45, "EQH": 37, "EQL": 38, "POOL": 88,
+              "range_high": 47, "range_low": 47, "swing": 40}
 
 
-@detector(37, 38, 39, 40, 41, 43, 44, 50, 51, 54, 55)
+@detector(37, 38, 39, 40, 41, 43, 44, 45, 47, 50, 51, 54, 55, 88)
 def liquidity_sweep(st: MarketState) -> List[Detection]:
     out = []
     b = st.bar
@@ -161,6 +208,7 @@ def liquidity_sweep(st: MarketState) -> List[Detection]:
         if sw and st.i - sw.index >= 3:
             levels.append(("swing", sw.price))
         best = None
+        n_swept = 0
         for name, lvl in levels:
             if side == SELL:
                 ok = b.high > lvl and b.close < lvl and (b.high - lvl) < 1.5 * atr
@@ -168,7 +216,9 @@ def liquidity_sweep(st: MarketState) -> List[Detection]:
                 ok = b.low < lvl and b.close > lvl and (lvl - b.low) < 1.5 * atr
             wick = (b.high - max(b.open, b.close)) if side == SELL else (min(b.open, b.close) - b.low)
             if ok and wick >= 0.4 * b.range:
-                pri = {"PDH": 3, "PDL": 3, "EQH": 2, "EQL": 2}.get(name, 1 if name == "swing" else 2)
+                pri = {"PWH": 4, "PWL": 4, "PDH": 3, "PDL": 3, "POOL": 3, "range_high": 2.5,
+                       "range_low": 2.5}.get(name, 1 if name == "swing" else 2)
+                n_swept += 1
                 if best is None or pri > best[0]:
                     best = (pri, name, lvl)
         if not best:
@@ -180,6 +230,12 @@ def liquidity_sweep(st: MarketState) -> List[Detection]:
             pid = _LEVEL_PID.get(name, 39)
         if tight and name in ("swing", "EQH", "EQL"):
             pid = 55 if side == SELL else 54  # UTAD / Spring at range extreme
+        elif name == "swing" and st.structure.trend == (1 if side == SELL else -1):
+            pid = 51 if side == SELL else 50  # bull / bear trap: breakout of trend extreme fails
+        elif name == "swing" and b.range >= 2.0 * atr:
+            pid = 41  # stop hunt: violent spike through the swing
+        if n_swept >= 2 and pid in (40, 43, 37, 38):
+            pid = 39  # several pools taken in one candle = generic liquidity sweep
         stop = b.high if side == SELL else b.low
         word = "deasupra" if side == SELL else "sub"
         d = _mk(st, pid, side, stop,
@@ -193,7 +249,7 @@ def liquidity_sweep(st: MarketState) -> List[Detection]:
 # ---------------------------------------------------------------------------
 # 82 / 89 BOS + retest continuation into OB / FVG
 # ---------------------------------------------------------------------------
-@detector(31, 34, 82, 89)
+@detector(82, 89)
 def bos_retest(st: MarketState) -> List[Detection]:
     out = []
     for side, ev in ((BUY, "BOS_UP"), (SELL, "BOS_DN")):
@@ -208,7 +264,7 @@ def bos_retest(st: MarketState) -> List[Detection]:
         reject = b.close > b.open if side == BUY else b.close < b.open
         if not reject:
             continue
-        pid = 34 if z.kind == "FVG" else 31
+        pid = 82 if st.i - st.events[ev] <= 8 else 89
         stop = min(z.bottom, b.low) if side == BUY else max(z.top, b.high)
         d = _mk(st, pid, side, stop,
                 f"{ev.replace('_', ' ')} confirmat, retragere în {z.kind} {z.bottom:.1f}-{z.top:.1f} "
@@ -223,7 +279,7 @@ def bos_retest(st: MarketState) -> List[Detection]:
 # ---------------------------------------------------------------------------
 # 83 / 84  CHOCH -> MSS entry on first retrace
 # ---------------------------------------------------------------------------
-@detector(83, 84, 48)
+@detector(83, 84)
 def choch_mss(st: MarketState) -> List[Detection]:
     out = []
     for side, ev, disp in ((BUY, "CHOCH_UP", "DISPLACEMENT_UP"), (SELL, "CHOCH_DN", "DISPLACEMENT_DN")):
@@ -380,18 +436,22 @@ def compression(st: MarketState) -> List[Detection]:
     lo = min(x.low for x in win)
     if hi - lo > 3.5 * atr:
         return out
+    half = win[:5]
+    took_low = min(x.low for x in win[5:]) < min(x.low for x in half)
+    took_high = max(x.high for x in win[5:]) > max(x.high for x in half)
     if b.close > hi and b.range > 1.3 * avg_rng and b.bullish:
-        d = _mk(st, 20, BUY, lo, f"Compresie: 10 lumânări înguste ({lo:.1f}-{hi:.1f}), "
+        d = _mk(st, 20 if took_low else 19, BUY, lo, f"Compresie: 10 lumânări înguste ({lo:.1f}-{hi:.1f}), "
                 f"spargere în sus cu expansiune -> lichiditatea compresiei alimentează mișcarea")
         if d: out.append(d)
     elif b.close < lo and b.range > 1.3 * avg_rng and not b.bullish:
-        d = _mk(st, 20, SELL, hi, f"Compresie: 10 lumânări înguste ({lo:.1f}-{hi:.1f}), "
+        d = _mk(st, 20 if took_high else 19, SELL, hi, f"Compresie: 10 lumânări înguste ({lo:.1f}-{hi:.1f}), "
                 f"spargere în jos cu expansiune")
         if d: out.append(d)
     return out
 
 
 def detect_all(st: MarketState) -> List[Detection]:
+    from . import patterns_ext  # noqa: F401  (registers the remaining detectors)
     res: List[Detection] = []
     if st.atr.value is None:
         return res

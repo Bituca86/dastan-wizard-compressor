@@ -35,7 +35,7 @@ class TestCatalog(unittest.TestCase):
     def test_91_patterns(self):
         self.assertEqual(sorted(CATALOG), list(range(1, 92)))
         self.assertTrue(IMPLEMENTED <= set(CATALOG))
-        self.assertGreaterEqual(len(IMPLEMENTED), 25)
+        self.assertEqual(IMPLEMENTED, set(CATALOG))
 
 
 class TestStructure(unittest.TestCase):

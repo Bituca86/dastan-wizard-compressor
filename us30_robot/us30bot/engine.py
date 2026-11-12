@@ -8,7 +8,7 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Callable, Dict, List, Optional
 
-from .context import MarketState, SessionClock
+from .context import MarketState, SessionClock, SpreadModel
 from .evaluator import Evaluator, Tracked
 from .learner import Learner
 from .matrix import cell_key, cluster, context_of, explain, family_key, features
@@ -26,9 +26,9 @@ class EngineConfig:
     cooldown_bars: int = 5  # same pattern/direction re-fire suppression
     one_position: bool = True
     timeout_bars: int = 60
-    spread_points: float = 2.5  # US30 spread + commission, in index points
     half_life: float = 400.0
     sessions: SessionClock = field(default_factory=SessionClock)
+    spread: SpreadModel = field(default_factory=SpreadModel)  # ICMarkets: 0.7 NYSE / 1.2 otherwise
     allowed_sessions: tuple = ("london", "ny_open", "ny")
 
 
@@ -60,6 +60,7 @@ class Engine:
         self.cfg = config or EngineConfig()
         self.st = MarketState(self.cfg.sessions)
         self.htf = MarketState(self.cfg.sessions, zz_mult=1.0)
+        self.st.htf = self.htf
         self.agg = HTFAggregator(self.cfg.htf_minutes)
         self.learner = learner or Learner(half_life=self.cfg.half_life)
         self.ev = Evaluator(self.cfg.timeout_bars)
@@ -76,8 +77,12 @@ class Engine:
         self.shadow_count = 0
 
     # ------------------------------------------------------------------ main loop
-    def on_bar(self, bar: Bar) -> Optional[Signal]:
+    def spread_now(self) -> float:
+        return self.cfg.spread.cost(self.st.bar.time, self.st.live_spread)
+
+    def on_bar(self, bar: Bar, live_spread: Optional[float] = None) -> Optional[Signal]:
         st = self.st
+        st.live_spread = live_spread
         st.update(bar)
         h = self.agg.update(bar)
         if h is not None:
@@ -100,7 +105,7 @@ class Engine:
                 self._adapt(d, cell, fam)
                 x = features(d, ctx, st, len(ds), base)
                 p, n = self.learner.score(cell, fam, x, explore=self.cfg.explore)
-                cost = self.cfg.spread_points / d.risk
+                cost = self.spread_now() / d.risk
                 exp_r = p * d.rr - (1 - p) - cost
                 scored.append((exp_r, p, n, d, ctx, cell, fam, x))
                 # every detection becomes a shadow trade -> learning sample
@@ -165,7 +170,7 @@ class Engine:
         self.open_signal = sig.id
         self.ev.track(Tracked(sig.id, sig.direction, sig.entry, sig.stop, sig.target, self.st.i,
                               {"shadow": False, "cell": cell,
-                               "cost_r": self.cfg.spread_points / abs(sig.entry - sig.stop)}))
+                               "cost_r": self.spread_now() / abs(sig.entry - sig.stop)}))
         for cb in self.on_signal:
             cb(sig)
         return sig

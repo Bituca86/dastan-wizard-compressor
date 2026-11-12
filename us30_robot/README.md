@@ -1,94 +1,107 @@
-# US30 M1 – Robot cu matrice de pattern-uri și auto-învățare
+# US30 M1 – Robot cu matrice de pattern-uri și auto-învățare (cTrader / ICMarkets)
 
-Pornește de la cheat-sheet-ul **„Institutional Price Action & Liquidity – Master Cheat Sheet”**
-(91 de structuri). Robotul:
+Pornește de la cheat-sheet-ul **„Institutional Price Action & Liquidity – Master Cheat Sheet”** (91 de structuri).
 
-1. scanează **în timp real** graficul M1 US30 (doar lumânări închise, fără repaint),
-2. recunoaște pattern-urile și propune **BUY/SELL** cu SL/TP și o explicație scurtă a convergenței,
-3. urmărește apoi fiecare semnal până la **confirmare / infirmare** și scrie un verdict post-mortem,
-4. **învață accelerat** din fiecare rezultat și își ajustează scorurile, stop-urile și țintele.
+1. **scanează în timp real** M1 US30 (doar lumânări închise, fără repaint) pentru **toate cele 91 de pattern-uri**,
+2. propune **BUY/SELL** cu SL/TP și o explicație scurtă a convergenței,
+3. urmărește fiecare semnal până la **confirmare / infirmare** și scrie verdictul post-mortem,
+4. **învață accelerat** din fiecare rezultat (și din cele netranzacționate),
+5. execută în cTrader în modurile **MANUAL / HIBRID / AUTO / ROBOT**.
 
-> Doar semnale (paper trading). Nu plasează ordine. Rezultatele pe date sintetice NU dovedesc un edge real.
+> ⚠️ Testează întâi pe **cont DEMO**. Rezultatele pe date sintetice nu dovedesc un edge real.
 
 ## Arhitectură
 
 ```
-feed M1 ─► MarketState (ATR, ZigZag HH/HL/LH/LL, BOS/CHOCH, OB/FVG/Breaker,
-           │            PDH/PDL, sesiuni Asia/Londra/NY, EQH/EQL, premium/discount)
-           ├► HTF M15 (agregat din M1) ─► bias de trend
-           ▼
-      Detectori (patterns.py) ─► Detection(entry, SL, TP, motiv)
-           ▼
-      MATRICEA DE CONFLUENȚĂ (matrix.py)
-        rânduri  = pattern × direcție            (91 × 2)
-        coloane  = sesiune × aliniere M15         (5 × 3)
-        + caracteristici continue: premium/discount, deplasare, volatilitate, RR, nivelul lichidității
-           ▼
-      Learner ─► P(succes), expectanță în R (cu spread) ─► Semnal + explicație
-           ▼
-      Evaluator: SL / TP / timeout, MFE/MAE, rezultat la 1R/1.5R/2R/3R, verdict
-           └──────────────► feedback în Learner + stop adaptiv per celulă
+ cTrader (ICMarkets)                         Python  (run.py serve)
+┌──────────────────────────┐   HTTP local   ┌───────────────────────────────────────────┐
+│ US30MatrixBridge.cs      │ ─ bară M1 ───► │ MarketState M1 + M15 (structură, zone,    │
+│  • trimite bare închise  │                │   lichiditate, sesiuni DST, spread)       │
+│  • execută ordine (risc, │ ◄─ acțiuni ──  │ 91 detectori ► Matrice de confluență      │
+│    leverage 1:30)        │                │ Learner ► P(succes), expectanță (R)       │
+│  • desenează semnale     │ ─ evenimente ► │ ModeController ► EXECUTĂ/AȘTEAPTĂ/NOTIFICĂ│
+│  • butoane mod + aprobare│                │ RiskManager ► limite zilnice, sizing      │
+│  • export istoric CSV    │                │ Evaluator ► confirmare/infirmare ► învățare│
+└──────────────────────────┘                └───────────────────────────────────────────┘
+                                               dashboard: http://127.0.0.1:8765/
 ```
 
-## Pattern-uri cu detector activ (31/91)
+## Cele 4 moduri
 
-| Familie | Pattern-uri (id din cheat-sheet) |
+| Mod | Ce face |
 |---|---|
-| Quasimodo | 1 QM Quick Retest, 2 QM Late Retest, 6 Reversal at QM |
-| Lichiditate | 37 EQH, 38 EQL, 39 Liquidity Sweep, 40 SFP, 41 Stop Hunt, 43 Session Liquidity, 44 PDH/PDL |
-| Wyckoff / capcane | 50 Bear Trap, 51 Bull Trap, 54 Spring, 55 UTAD |
-| Structură | 82 BOS, 83 CHOCH, 84 MSS, 48 Displacement, 89 Retest & Continuation |
-| Zone | 31 Order Block, 32 Breaker, 34 FVG |
-| Clasice | 27/28 Triple Top/Bottom, 59/60 Double Top/Bottom, 57/58 (Inverse) H&S |
-| Altele | 17 3 Drive, 19/20 Compression (+ Liquidity) |
+| **MANUAL** | Doar propune (grafic + dashboard + sunet). Execuți tu. Robotul învață oricum. |
+| **HIBRID** | Semnalele cu încredere mare (P ≥ 60% și expectanță ≥ 0,4R) se execută singure; restul așteaptă **✔ Aprob / ✖ Refuz** (expiră în 3 min sau dacă prețul a plecat > 0,3R). |
+| **AUTO** | Execută toate semnalele care trec filtrele normale. |
+| **ROBOT** | Pilot automat când nu ești online: filtre stricte (P ≥ 55%, ≥ 0,3R), **risc la jumătate**, oprire la −2%/zi sau 3 pierderi la rând. |
 
-Restul sunt în `CATALOG` (rulează `python run.py catalog`). Premium/Discount (36) și HTF/MTF (85/86)
-sunt folosite ca **coloane de context** în matrice, nu ca declanșatoare.
-Notă: în imagine numerele 19 și 37 apar de două ori; aici Can-Can = 18 și Premium/Discount = 36.
+**Prezența** se detectează automat: mișcarea mouse-ului pe grafic, butoanele din cBot sau dashboard-ul.
+După 20 de minute fără prezență, MANUAL/HIBRID/AUTO trec automat în **ROBOT**.
+Când revii, se întorc la modul ales. Opțiunea se dezactivează din `ModeConfig.auto_robot_offline`.
+
+## Calibrare ICMarkets
+
+- **Spread**: 0,7 pct în sesiunea NYSE, 1,2 pct în rest (spread-ul live din cTrader are prioritate) – inclus în expectanță.
+- **Ore**: cBot-ul rulează în UTC; sesiunile (Londra, NY open 09:30 ET, NY) se ajustează automat la ora de vară/iarnă (SUA și UE separat).
+- **Leverage 1:30**: volumul e limitat ca marja să nu depășească 80% din marja liberă.
+- **Sizing**: risc % din sold (implicit 0,5%), calculat cu `TickValue/TickSize` reale ale simbolului.
+
+## Instalare
+
+**1. Python** (Windows: python.org, 3.9+; fără alte pachete)
+```bat
+cd us30_robot
+python run.py serve --mode MANUAL --risk 0.5
+```
+Deschide `http://127.0.0.1:8765/` pentru dashboard.
+
+**2. cTrader**: *Automate → cBots → New* → lipește `ctrader/US30MatrixBridge.cs` → **Build** → atașează pe graficul **US30**.
+La „Access rights” acceptă FullAccess (îi trebuie pentru conexiunea locală și exportul CSV).
+La pornire trimite 5000 de bare de warm-up, ca robotul să învețe din istoric.
+
+**3. Istoric pentru backtest**: pornește cBot-ul cu `Export istoric CSV la pornire = Yes`.
+Fișierul apare în `Documente\US30MX\US30_M1_UTC.csv`, apoi:
+```bat
+python run.py backtest --csv "%USERPROFILE%\Documents\US30MX\US30_M1_UTC.csv" --mode AUTO
+```
+Backtestul pre-antrenează starea din `state/`, pe care `serve` o folosește apoi live.
+
+**De pe telefon** (aceeași rețea Wi-Fi): `python run.py serve --host 0.0.0.0 --token PAROLA`
+→ `http://IP-PC:8765/?t=PAROLA`. Setează același token în parametrul cBot-ului.
+
+## Pattern-uri (91/91 cu detector)
+
+`python run.py catalog` listează toate. Pe familii:
+
+| Familie | Exemple de reguli obiective |
+|---|---|
+| QM (1–8) | H→L→HH→LL, retest QML; rapid/târziu/re-intrare/QMTR/continuare/inversare/DM shadow |
+| Fakeout (9, 13–15, 21, 50, 51, 91) | închidere dincolo de nivel apoi înapoi în ≤5 bare; EQH, retest, diamond |
+| Lichiditate (37–47, 78, 79, 88) | sweep cu fitil ≥40% peste PDH/PWH/sesiune/EQH/pool/range; liquidity run cu deplasare |
+| Structură (48, 73, 74, 82–84) | BOS/CHOCH pe închidere, MSS cu deplasare, displacement + reclaim, scări |
+| Zone (29–35, 80, 81, 87) | OB, breaker, mitigation, supply/demand (bază + impuls), FVG, void, fitil, VI, gap |
+| Context (36, 85, 86) | OTE 62–85%, zonă M15, confluență M15 + CHOCH M1 |
+| Clasice (16, 22–28, 57–72) | regresie pe swing-uri: triunghiuri, pene, megafon, diamant, rounding (parabolă R²≥0,7), H&S, double/triple |
+| Wyckoff (52–56) | range ≥40 bare după trend, spring/UTAD, SOS/SOW, LPS |
+| Elliott (75–77) | reguli de impuls (2 nu depășește 0, 3 nu cea mai scurtă, 4 fără suprapunere), ABC, WXY |
+
+Pattern-urile subiective sunt traduse în reguli euristice. **Learner-ul decide** pentru fiecare celulă (pattern × direcție × sesiune × aliniere M15) cât valorează de fapt.
+În imagine, numerele 19 și 37 apar de două ori; aici Can-Can = 18 și Premium/Discount = 36.
 
 ## Cum învață „accelerat”
 
 | Mecanism | Efect |
 |---|---|
-| **Shadow trades** | fiecare detecție e evaluată, chiar dacă nu a devenit semnal → de ~25× mai multe etichete |
-| **Ținte multiple** | fiecare detecție e etichetată la 1R/1.5R/2R/3R → robotul alege RR-ul cu cea mai bună expectanță per celulă |
-| **Prior ierarhic (empirical Bayes)** | o celulă nouă pornește de la statistica familiei ei (ex. toate LIQUIDITY\|SELL), nu de la zero |
-| **Regresie logistică online** | învață *de ce* funcționează (aliniere M15, sesiune, premium/discount …); ponderile se afișează |
-| **Uitare exponențială** | half-life 400 eșantioane → se adaptează la schimbări de regim |
-| **Post-mortem → acțiune** | „stop vânat apoi ținta atinsă” lărgește stop-ul acelei celule; câștigurile îl strâng la loc |
-| **Thompson sampling** (`--explore`) | în paper trading explorează celulele incerte ca să învețe mai repede |
+| **Shadow trades** | fiecare detecție e evaluată, nu doar semnalele → zeci de ori mai multe exemple |
+| **Ținte multiple** | fiecare detecție e etichetată la 1R/1,5R/2R/3R → RR optim per celulă |
+| **Prior ierarhic** | o celulă nouă pornește de la statistica familiei ei, nu de la zero |
+| **Regresie logistică online** | învață *de ce* funcționează (aliniere M15, sesiune, premium/discount…) |
+| **Uitare exponențială** | se adaptează la schimbări de regim |
+| **Post-mortem → acțiune** | „stop vânat apoi ținta atinsă” lărgește stop-ul acelei celule |
+| **Thompson sampling** (`--explore`) | explorare controlată în paper trading |
 
-## Rulare
+## Teste
 
 ```bash
-cd us30_robot
-python run.py demo                                  # date sintetice, toată bucla
-python run.py backtest --csv US30_M1.csv --tz-shift -2   # export MT5, server GMT+2 → UTC
-python run.py live --symbol US30 --tz-shift -2      # MT5 pe Windows: pip install MetaTrader5
 python -m unittest discover -s tests -v
 ```
-
-Starea învățată se salvează în `state/` (`learner.json`, `adaptive.json`, `journal.json`) și se reîncarcă
-la pornire, deci un backtest pe istoric „pre-antrenează” robotul înainte de live.
-
-Exemplu de semnal:
-
-```
-[2026-01-16 13:22] SEMNAL #59 SELL @ 42813.4 SL 42840.4 TP 42759.3
-VÂNZARE (SELL) – P(succes)=45%, expectanță=+0.31R
-  • #34 FVG / Imbalance: BOS DN confirmat, retragere în FVG 42821.8-42836.2 și lumânare de respingere
-  Context: sesiune london, în direcția trendului M15, zonă nefavorabilă.
-  Istoric celulă [34|SELL|london|with]: win-rate 59% din 22 cazuri (ponderat).
-   ↳ #59 WIN +1.95R după 31 min – CONFIRMAT după presiune adversă de 0.8R
-```
-
-## Parametri (EngineConfig)
-
-`min_prob`, `min_expectancy_r`, `spread_points` (2.5), `timeout_bars` (60 min), `cooldown_bars`,
-`allowed_sessions` (implicit Londra + NY), `sessions` (ore UTC; vara se mută cu 1h), `half_life`.
-
-## Limitări
-
-- Fără dependențe externe (Python 3.9+ standard), deci rulează oriunde; live doar prin MT5.
-- Pe M1 spread-ul contează mult: expectanța include costul real (`spread_points / risc`).
-- Pattern-urile subiective (Elliott, wedges, diamond, Can-Can) nu au încă detector obiectiv.
