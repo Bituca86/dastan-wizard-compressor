@@ -7,6 +7,7 @@
   POST /presence {}                          you are online (mouse on chart / dashboard)
   POST /decision {"sid":12,"approve":true}   HIBRID approvals
   POST /event    {"type":"opened|closed|rejected","sid":..,"pnl":..}
+  POST /shutdown                             save state and exit (sent by the cBot on stop)
   GET/POST /settings  {"risk_pct":1.0,"hybrid_auto_prob":0.6,...}
   GET  /status   JSON;  GET / dashboard (HTML)
 
@@ -44,6 +45,7 @@ class Bridge:
         self.state_dir = state_dir
         self.save_every = save_every
         self._n = 0
+        self.on_shutdown = None  # set by serve()
 
     def warmup(self, bars) -> dict:
         with self.lock:
@@ -129,6 +131,12 @@ def make_handler(br: Bridge, token: Optional[str]):
                     return self._send(200, br.bar(body))
                 if path == "/warmup":
                     return self._send(200, br.warmup(body.get("bars", [])))
+                if path == "/shutdown":
+                    br.save()
+                    self._send(200, {"ok": True, "saved": True})
+                    if br.on_shutdown:
+                        br.on_shutdown()
+                    return
                 with br.lock:
                     if path == "/mode":
                         return self._send(200, {"mode": br.t.set_mode(body["mode"]),
@@ -153,6 +161,7 @@ def make_handler(br: Bridge, token: Optional[str]):
 
 def serve(br: Bridge, host: str = "127.0.0.1", port: int = 8765, token: Optional[str] = None):
     srv = ThreadingHTTPServer((host, port), make_handler(br, token))
+    br.on_shutdown = lambda: threading.Thread(target=srv.shutdown, daemon=True).start()
     print(f"US30 Matrix bridge pe http://{host}:{port}  (dashboard: /)  mod={br.t.modes.mode}")
     try:
         srv.serve_forever()
@@ -161,6 +170,7 @@ def serve(br: Bridge, host: str = "127.0.0.1", port: int = 8765, token: Optional
     finally:
         br.save()
         srv.server_close()
+        print("Server oprit, starea a fost salvată.")
 
 
 DASHBOARD = """<!doctype html><html lang="ro"><head><meta charset="utf-8">

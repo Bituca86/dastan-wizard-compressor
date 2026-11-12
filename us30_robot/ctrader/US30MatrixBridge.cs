@@ -25,6 +25,21 @@ namespace cAlgo.Robots
         [Parameter("Server URL", DefaultValue = "http://127.0.0.1:8765", Group = "Conexiune")]
         public string ServerUrl { get; set; }
 
+        [Parameter("Pornește serverul Python automat", DefaultValue = true, Group = "Server Python")]
+        public bool AutoStartServer { get; set; }
+
+        [Parameter("Folder robot (cu run.py)", DefaultValue = "", Group = "Server Python")]
+        public string RobotFolder { get; set; }
+
+        [Parameter("Comanda Python", DefaultValue = "python", Group = "Server Python")]
+        public string PythonCmd { get; set; }
+
+        [Parameter("Fereastră server vizibilă", DefaultValue = true, Group = "Server Python")]
+        public bool ShowServerWindow { get; set; }
+
+        [Parameter("Oprește serverul la oprirea cBot-ului", DefaultValue = true, Group = "Server Python")]
+        public bool StopServerOnStop { get; set; }
+
         [Parameter("Token (opțional)", DefaultValue = "", Group = "Conexiune")]
         public string Token { get; set; }
 
@@ -59,6 +74,8 @@ namespace cAlgo.Robots
         private DateTime _lastPresence = DateTime.MinValue;
         private bool _serverOk;
         private bool _needResync;
+        private System.Diagnostics.Process _server;
+        private DateTime _lastStartAttempt = DateTime.MinValue;
         private readonly Dictionary<string, Button> _modeButtons = new Dictionary<string, Button>();
         private TextBlock _status;
         private TextBlock _pendingText;
@@ -74,6 +91,12 @@ namespace cAlgo.Robots
             _m1 = MarketData.GetBars(TimeFrame.Minute);
             BuildUi();
 
+            if (AutoStartServer && !Ping())
+            {
+                StartServer();
+                WaitForServer(90);
+            }
+
             if (ExportHistory)
                 ExportCsv();
 
@@ -84,6 +107,92 @@ namespace cAlgo.Robots
             Positions.Closed += OnPositionClosed;
             Chart.MouseMove += args => Presence(false);
             Timer.Start(1);
+        }
+
+        protected override void OnStop()
+        {
+            if (!StopServerOnStop || _server == null) return;
+            try
+            {
+                Post("/shutdown", new Dictionary<string, object>()); // server saves its learning, then exits
+                if (!_server.WaitForExit(8000)) _server.Kill(true);
+                Print("Server Python oprit.");
+            }
+            catch (Exception e) { Print("Oprire server: " + e.Message); }
+        }
+
+        // ------------------------------------------------------------------ python server
+        private string ResolveRobotFolder()
+        {
+            var cands = new List<string>();
+            if (!string.IsNullOrWhiteSpace(RobotFolder)) cands.Add(RobotFolder.Trim().Trim('"'));
+            string docs = Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments);
+            cands.Add(System.IO.Path.Combine(docs, "us30_robot"));
+            cands.Add(System.IO.Path.Combine(docs, "US30MX", "us30_robot"));
+            cands.Add(System.IO.Path.Combine(docs, "dastan-wizard-compressor", "us30_robot"));
+            foreach (var c in cands)
+                if (System.IO.File.Exists(System.IO.Path.Combine(c, "run.py"))) return c;
+            return null;
+        }
+
+        private void StartServer()
+        {
+            _lastStartAttempt = DateTime.UtcNow;
+            string folder = ResolveRobotFolder();
+            if (folder == null)
+            {
+                Print("Nu găsesc run.py. Setează parametrul 'Folder robot' (ex. C:\\Users\\...\\us30_robot).");
+                return;
+            }
+            int port = 8765;
+            try { port = new Uri(ServerUrl).Port; } catch { }
+            string args = "run.py serve --port " + port + (string.IsNullOrEmpty(Token) ? "" : " --token " + Token);
+            try
+            {
+                var psi = new System.Diagnostics.ProcessStartInfo(PythonCmd, args)
+                {
+                    WorkingDirectory = folder,
+                    UseShellExecute = ShowServerWindow,
+                    CreateNoWindow = !ShowServerWindow,
+                    WindowStyle = ShowServerWindow ? System.Diagnostics.ProcessWindowStyle.Minimized
+                                                   : System.Diagnostics.ProcessWindowStyle.Hidden
+                };
+                _server = System.Diagnostics.Process.Start(psi);
+                Print("Server Python pornit din " + folder + " (" + PythonCmd + " " + args + ")");
+            }
+            catch (Exception e)
+            {
+                Print("Nu pot porni Python ('" + PythonCmd + "'): " + e.Message +
+                      ". Verifică instalarea Python sau setează 'Comanda Python' (ex. py sau calea completă python.exe).");
+            }
+        }
+
+        private void WaitForServer(int seconds)
+        {
+            var until = DateTime.UtcNow.AddSeconds(seconds);
+            while (DateTime.UtcNow < until)
+            {
+                if (Ping()) { Print("Server Python gata."); return; }
+                if (_server != null && _server.HasExited)
+                {
+                    Print("Serverul Python s-a oprit imediat (cod " + _server.ExitCode + "). Rulează manual 'python run.py serve' ca să vezi eroarea.");
+                    return;
+                }
+                System.Threading.Thread.Sleep(500);
+            }
+            Print("Serverul Python nu a răspuns în " + seconds + " s.");
+        }
+
+        private bool Ping()
+        {
+            try
+            {
+                var req = new System.Net.Http.HttpRequestMessage(System.Net.Http.HttpMethod.Get, ServerUrl + "/settings");
+                if (!string.IsNullOrEmpty(Token)) req.Headers.Add("X-Token", Token);
+                using (var cts = new System.Threading.CancellationTokenSource(TimeSpan.FromSeconds(2)))
+                    return _client.SendAsync(req, cts.Token).Result.IsSuccessStatusCode;
+            }
+            catch { return false; }
         }
 
         // ------------------------------------------------------------------ data flow
@@ -104,6 +213,13 @@ namespace cAlgo.Robots
 
         protected override void OnTimer()
         {
+            // watchdog: restart the Python server if the one we started has died
+            if (AutoStartServer && !_serverOk && (DateTime.UtcNow - _lastStartAttempt).TotalSeconds > 20
+                && (_server == null || _server.HasExited) && !Ping())
+            {
+                Print("Serverul Python nu răspunde – îl repornesc.");
+                StartServer();
+            }
             HandleActions(Get("/actions"));
             if (_serverOk && _needResync)
             {

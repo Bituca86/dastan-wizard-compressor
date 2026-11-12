@@ -149,3 +149,30 @@ class TestBridge(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestShutdown(unittest.TestCase):
+    def test_shutdown_endpoint_saves_and_stops(self):
+        import os, socket, tempfile
+        from us30bot.server import serve
+        eng = Engine(EngineConfig())
+        tr = Trader(eng, ModeController("MANUAL", always_online=True), RiskManager())
+        for b in synthetic_bars(300, seed=2):
+            tr.on_bar(b)
+        d = tempfile.mkdtemp()
+        br = Bridge(tr, d)
+        s = socket.socket(); s.bind(("127.0.0.1", 0)); port = s.getsockname()[1]; s.close()
+        th = threading.Thread(target=serve, args=(br, "127.0.0.1", port), daemon=True)
+        th.start()
+        for _ in range(50):
+            try:
+                urllib.request.urlopen(f"http://127.0.0.1:{port}/settings", timeout=1)
+                break
+            except Exception:
+                import time; time.sleep(0.1)
+        req = urllib.request.Request(f"http://127.0.0.1:{port}/shutdown", data=b"{}",
+                                     headers={"Content-Type": "application/json"})
+        self.assertTrue(json.loads(urllib.request.urlopen(req, timeout=5).read())["saved"])
+        th.join(5)
+        self.assertFalse(th.is_alive())
+        self.assertTrue(os.path.exists(os.path.join(d, "learner.json")))

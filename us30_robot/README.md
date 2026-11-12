@@ -56,7 +56,11 @@ python run.py serve --mode MANUAL
 ```
 Deschide `http://127.0.0.1:8765/` pentru dashboard.
 
-Serverul trebuie să ruleze **cât timp rulează cBot-ul**. Pe Windows folosește **`start_server.bat`** (dublu-click): îl repornește automat dacă se oprește.
+Serverul trebuie să ruleze **cât timp rulează cBot-ul**. **Implicit cBot-ul îl pornește singur** (parametrii din grupul „Server Python”):
+la Start pornește `python run.py serve`, îl repornește dacă se oprește și, la Stop, îi cere să salveze învățarea și să se închidă.
+Pune folderul `us30_robot` în `Documente\us30_robot` sau setează parametrul „Folder robot”.
+Dacă `python` nu e recunoscut, setează „Comanda Python” la `py` sau la calea completă către `python.exe`.
+Alternativă manuală: `start_server.bat` (dublu-click) sau `python run.py serve`.
 Dacă serverul repornește, cBot-ul retrimite singur istoricul și modul, iar ultimul mod ales e reținut în `state/mode.txt`.
 Dezactivează intrarea PC-ului în *Sleep* (Setări → Sistem → Alimentare), altfel se opresc și cTrader, și serverul.
 Pozițiile deschise au oricum SL/TP la broker.
