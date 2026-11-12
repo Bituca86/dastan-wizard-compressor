@@ -50,6 +50,7 @@ class Bridge:
     def warmup(self, bars) -> dict:
         with self.lock:
             self.t.warmup = True
+            n_journal = len(self.t.eng.journal)
             last = self.t.eng.st.bar.time if self.t.eng.st.bars else None
             n = 0
             for d in bars:
@@ -62,6 +63,10 @@ class Bridge:
             self.t.warmup = False
             self.t.drain()
             self.t.eng.open_signal = None  # warm-up signals are virtual only
+            # keep live statistics honest: replayed history is not a live result
+            del self.t.eng.journal[n_journal:]
+            self.t.eng.signals.clear()
+            self.t.eng.ev.open = [x for x in self.t.eng.ev.open if x.payload.get("shadow")]
             print(f"[{datetime.now():%H:%M:%S}] warm-up: {n} bare noi, eșantioane învățare "
                   f"{self.t.eng.learner.updates}")
             return {"ok": True, "bars": n, "learning_samples": self.t.eng.learner.updates}

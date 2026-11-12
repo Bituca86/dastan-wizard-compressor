@@ -176,3 +176,16 @@ class TestShutdown(unittest.TestCase):
         th.join(5)
         self.assertFalse(th.is_alive())
         self.assertTrue(os.path.exists(os.path.join(d, "learner.json")))
+
+
+class TestWarmupStats(unittest.TestCase):
+    def test_warmup_does_not_count_as_live_signals(self):
+        import tempfile
+        eng = Engine(EngineConfig(min_prob=0.0, min_expectancy_r=-5))
+        tr = Trader(eng, ModeController("AUTO", always_online=True), RiskManager())
+        br = Bridge(tr, tempfile.mkdtemp())
+        bars = [{"time": b.time.isoformat(), "o": b.open, "h": b.high, "l": b.low, "c": b.close}
+                for b in synthetic_bars(6000, seed=4)]
+        br.warmup(bars)
+        self.assertEqual(eng.summary()["signals"], 0)
+        self.assertGreater(eng.learner.updates, 0)
