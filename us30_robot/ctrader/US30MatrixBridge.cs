@@ -9,9 +9,7 @@
 using System;
 using System.Collections.Generic;
 using System.Globalization;
-using System.IO;
 using System.Linq;
-using System.Net.Http;
 using System.Text;
 using System.Text.Json;
 using cAlgo.API;
@@ -54,7 +52,7 @@ namespace cAlgo.Robots
         [Parameter("Label poziții", DefaultValue = "US30MX", Group = "Execuție")]
         public string BotLabel { get; set; }
 
-        private static readonly HttpClient Http = new HttpClient { Timeout = TimeSpan.FromSeconds(30) };
+        private static readonly System.Net.Http.HttpClient _client = new System.Net.Http.HttpClient { Timeout = TimeSpan.FromSeconds(30) };
         private Bars _m1;
         private string _mode = "MANUAL";
         private string _effective = "MANUAL";
@@ -136,14 +134,14 @@ namespace cAlgo.Robots
         {
             while (_m1.Count < ExportBars)
                 if (_m1.LoadMoreHistory() == 0) break;
-            string dir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments), "US30MX");
-            Directory.CreateDirectory(dir);
-            string file = Path.Combine(dir, SymbolName + "_M1_UTC.csv");
+            string dir = System.IO.Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments), "US30MX");
+            System.IO.Directory.CreateDirectory(dir);
+            string file = System.IO.Path.Combine(dir, SymbolName + "_M1_UTC.csv");
             var sb = new StringBuilder("datetime,open,high,low,close,volume\n");
             for (int k = 0; k < _m1.Count - 1; k++)
                 sb.AppendFormat(Inv, "{0:yyyy-MM-dd HH:mm:ss},{1},{2},{3},{4},{5}\n", _m1.OpenTimes[k],
                     _m1.OpenPrices[k], _m1.HighPrices[k], _m1.LowPrices[k], _m1.ClosePrices[k], _m1.TickVolumes[k]);
-            File.WriteAllText(file, sb.ToString());
+            System.IO.File.WriteAllText(file, sb.ToString());
             Print("Istoric exportat (" + (_m1.Count - 1) + " bare): " + file);
         }
 
@@ -365,12 +363,12 @@ namespace cAlgo.Robots
         {
             try
             {
-                var req = new HttpRequestMessage(HttpMethod.Post, ServerUrl + path)
+                var req = new System.Net.Http.HttpRequestMessage(System.Net.Http.HttpMethod.Post, ServerUrl + path)
                 {
-                    Content = new StringContent(JsonSerializer.Serialize(body), Encoding.UTF8, "application/json")
+                    Content = new System.Net.Http.StringContent(JsonSerializer.Serialize(body), Encoding.UTF8, "application/json")
                 };
                 if (!string.IsNullOrEmpty(Token)) req.Headers.Add("X-Token", Token);
-                var res = Http.SendAsync(req).Result;
+                var res = _client.SendAsync(req).Result;
                 var txt = res.Content.ReadAsStringAsync().Result;
                 _serverOk = true;
                 return JsonDocument.Parse(txt).RootElement.Clone();
@@ -387,9 +385,9 @@ namespace cAlgo.Robots
         {
             try
             {
-                var req = new HttpRequestMessage(HttpMethod.Get, ServerUrl + path);
+                var req = new System.Net.Http.HttpRequestMessage(System.Net.Http.HttpMethod.Get, ServerUrl + path);
                 if (!string.IsNullOrEmpty(Token)) req.Headers.Add("X-Token", Token);
-                var res = Http.SendAsync(req).Result;
+                var res = _client.SendAsync(req).Result;
                 _serverOk = true;
                 return JsonDocument.Parse(res.Content.ReadAsStringAsync().Result).RootElement.Clone();
             }
