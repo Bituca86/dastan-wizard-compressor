@@ -451,10 +451,13 @@ def compression(st: MarketState) -> List[Detection]:
 
 
 def detect_all(st: MarketState) -> List[Detection]:
-    from . import patterns_ext  # noqa: F401  (registers the remaining detectors)
     res: List[Detection] = []
     if st.atr.value is None:
         return res
     for _, fn in DETECTORS:
         res.extend(fn(st))
     return res
+
+
+# register the remaining detectors (module imports helpers from this one)
+from . import patterns_ext  # noqa: E402,F401
