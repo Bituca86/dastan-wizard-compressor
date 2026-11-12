@@ -56,6 +56,11 @@ python run.py serve --mode MANUAL
 ```
 Deschide `http://127.0.0.1:8765/` pentru dashboard.
 
+Serverul trebuie să ruleze **cât timp rulează cBot-ul**. Pe Windows folosește **`start_server.bat`** (dublu-click): îl repornește automat dacă se oprește.
+Dacă serverul repornește, cBot-ul retrimite singur istoricul și modul, iar ultimul mod ales e reținut în `state/mode.txt`.
+Dezactivează intrarea PC-ului în *Sleep* (Setări → Sistem → Alimentare), altfel se opresc și cTrader, și serverul.
+Pozițiile deschise au oricum SL/TP la broker.
+
 **2. cTrader**: *Automate → cBots → New* → lipește `ctrader/US30MatrixBridge.cs` → **Build** → atașează pe graficul **US30**.
 La „Access rights” acceptă FullAccess (îi trebuie pentru conexiunea locală și exportul CSV).
 La pornire trimite 5000 de bare de warm-up, ca robotul să învețe din istoric.

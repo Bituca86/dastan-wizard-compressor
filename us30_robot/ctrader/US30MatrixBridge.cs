@@ -58,6 +58,7 @@ namespace cAlgo.Robots
         private string _effective = "MANUAL";
         private DateTime _lastPresence = DateTime.MinValue;
         private bool _serverOk;
+        private bool _needResync;
         private readonly Dictionary<string, Button> _modeButtons = new Dictionary<string, Button>();
         private TextBlock _status;
         private TextBlock _pendingText;
@@ -104,6 +105,14 @@ namespace cAlgo.Robots
         protected override void OnTimer()
         {
             HandleActions(Get("/actions"));
+            if (_serverOk && _needResync)
+            {
+                // the Python server came back (maybe restarted): resend history and our mode
+                _needResync = false;
+                Print("Server Python reconectat – retrimit istoricul și modul " + _mode);
+                SendWarmup();
+                SetMode(_mode);
+            }
         }
 
         private void SendWarmup()
@@ -376,6 +385,7 @@ namespace cAlgo.Robots
             catch (Exception e)
             {
                 if (_serverOk) Print("Server Python indisponibil: " + e.Message);
+                _needResync = true; // covers also "server not started yet" when the cBot starts
                 _serverOk = false;
                 return null;
             }
@@ -393,6 +403,7 @@ namespace cAlgo.Robots
             }
             catch
             {
+                _needResync = true;
                 _serverOk = false;
                 return null;
             }

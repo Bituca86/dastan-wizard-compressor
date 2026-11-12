@@ -85,10 +85,21 @@ def main() -> int:
     if a.cmd == "serve":
         from us30bot.server import Bridge, serve
         from us30bot.telegram import TelegramBot, load_config
-        if a.mode.upper() == "AUTO" and "--mode" not in sys.argv:
-            a.mode = "MANUAL"  # safe default for live
+        mode_file = os.path.join(a.state, "mode.txt")
+        if "--mode" not in sys.argv:
+            a.mode = "MANUAL"  # safe default for live ...
+            if os.path.exists(mode_file):  # ... unless a mode was chosen before a restart
+                with open(mode_file, encoding="utf-8") as fh:
+                    a.mode = fh.read().strip() or "MANUAL"
         tr = build(a, paper=False)
         br = Bridge(tr, a.state, settings=tr.settings)
+
+        def remember_mode(act):
+            if act.get("type") == "mode" and not act.get("auto"):
+                os.makedirs(a.state, exist_ok=True)
+                with open(mode_file, "w", encoding="utf-8") as fh:
+                    fh.write(act["mode"])
+        tr.listeners.append(remember_mode)
         tg = load_config(a.state)
         if tg:
             TelegramBot(tg["token"], tg["chat_id"], br, notify_all_signals=not a.tg_only_actionable).start()
