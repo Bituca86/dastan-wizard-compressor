@@ -44,14 +44,15 @@ Când revii, se întorc la modul ales. Opțiunea se dezactivează din `ModeConfi
 - **Spread**: 0,7 pct în sesiunea NYSE, 1,2 pct în rest (spread-ul live din cTrader are prioritate) – inclus în expectanță.
 - **Ore**: cBot-ul rulează în UTC; sesiunile (Londra, NY open 09:30 ET, NY) se ajustează automat la ora de vară/iarnă (SUA și UE separat).
 - **Leverage 1:30**: volumul e limitat ca marja să nu depășească 80% din marja liberă.
-- **Sizing**: risc % din sold (implicit 0,5%), calculat cu `TickValue/TickSize` reale ale simbolului.
+- **Sizing**: risc % din sold (implicit **1%**, în ROBOT 0,5%), calculat cu `TickValue/TickSize` reale ale simbolului.
+  Parametrul cBot-ului „Risc maxim %” (implicit 2%) e o limită de siguranță peste setarea din Python.
 
 ## Instalare
 
 **1. Python** (Windows: python.org, 3.9+; fără alte pachete)
 ```bat
 cd us30_robot
-python run.py serve --mode MANUAL --risk 0.5
+python run.py serve --mode MANUAL
 ```
 Deschide `http://127.0.0.1:8765/` pentru dashboard.
 
@@ -65,6 +66,31 @@ Fișierul apare în `Documente\US30MX\US30_M1_UTC.csv`, apoi:
 python run.py backtest --csv "%USERPROFILE%\Documents\US30MX\US30_M1_UTC.csv" --mode AUTO
 ```
 Backtestul pre-antrenează starea din `state/`, pe care `serve` o folosește apoi live.
+
+**Telegram** (o singură dată):
+1. În Telegram scrie-i lui **@BotFather** `/newbot`, alege un nume și copiază token-ul primit.
+2. `python run.py telegram-setup --tg-token <TOKEN>`, apoi trimite `/start` botului tău.
+   Token-ul și chat id-ul se salvează local în `state/telegram.json` (nu ajung în git).
+3. `python run.py serve` pornește automat și Telegram.
+
+Primești fiecare semnal cu explicația, butoane **✔ Aprob / ✖ Refuz** în HIBRID, execuțiile, rezultatul cu verdictul
+(mesajul inițial se actualizează), închiderile cu profit/pierdere, oprirea la limita zilnică și trecerea automată în ROBOT.
+Comenzi: `/status`, `/mod AUTO`, `/online`, `/risc 1.0`, `/prag 0.60 0.40`, `/robot 0.55 0.30`, `/setari`, `/set <cheie> <valoare>`.
+Doar chat-ul tău e ascultat. Orice mesaj sau buton apăsat te marchează „online”.
+Pentru a primi doar semnalele executate sau de aprobat: `serve --tg-only-actionable`.
+
+**Setări** – modificabile din dashboard (secțiunea „Setări”), din Telegram sau din `state/settings.json`;
+se păstrează la repornire și au limite de siguranță (ex. risc 0,05–3%):
+
+| Cheie | Implicit | Ce face |
+|---|---|---|
+| `risk_pct` | 1.0 | risc % pe tranzacție |
+| `hybrid_auto_prob` / `hybrid_auto_exp` | 0.60 / 0.40 | HIBRID: prag pentru execuție fără aprobare |
+| `approval_timeout_bars` | 3 | minute pentru aprobare |
+| `robot_min_prob` / `robot_min_exp` | 0.55 / 0.30 | praguri ROBOT |
+| `robot_risk_factor` | 0.5 | ROBOT riscă jumătate |
+| `max_daily_loss_pct` / `max_consecutive_losses` / `max_trades_day` | 2 / 3 / 10 | siguranțe zilnice |
+| `offline_after_min` / `auto_robot_offline` | 20 / da | trecerea automată în ROBOT |
 
 **De pe telefon** (aceeași rețea Wi-Fi): `python run.py serve --host 0.0.0.0 --token PAROLA`
 → `http://IP-PC:8765/?t=PAROLA`. Setează același token în parametrul cBot-ului.

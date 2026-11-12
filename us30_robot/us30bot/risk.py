@@ -8,7 +8,7 @@ from typing import List, Optional, Tuple
 
 @dataclass
 class RiskConfig:
-    risk_pct: float = 0.5  # % of balance risked per trade (before mode factor)
+    risk_pct: float = 1.0  # % of balance risked per trade (before mode factor)
     max_daily_loss_pct: float = 2.0  # circuit breaker
     max_trades_day: int = 10
     max_consecutive_losses: int = 3  # pause for the rest of the day

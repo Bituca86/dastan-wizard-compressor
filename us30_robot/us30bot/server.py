@@ -7,6 +7,7 @@
   POST /presence {}                          you are online (mouse on chart / dashboard)
   POST /decision {"sid":12,"approve":true}   HIBRID approvals
   POST /event    {"type":"opened|closed|rejected","sid":..,"pnl":..}
+  GET/POST /settings  {"risk_pct":1.0,"hybrid_auto_prob":0.6,...}
   GET  /status   JSON;  GET / dashboard (HTML)
 
 bar = {"time":"2026-11-12T14:31:00","o":..,"h":..,"l":..,"c":..,"v":..,"spread":..,
@@ -24,6 +25,7 @@ from typing import Optional
 from urllib.parse import parse_qs, urlparse
 
 from .models import Bar
+from .settings import SPEC, Settings
 from .trader import Trader
 
 
@@ -34,8 +36,10 @@ def parse_bar(d: dict) -> Bar:
 
 
 class Bridge:
-    def __init__(self, trader: Trader, state_dir: str, save_every: int = 30):
+    def __init__(self, trader: Trader, state_dir: str, save_every: int = 30,
+                 settings: Optional[Settings] = None):
         self.t = trader
+        self.settings = settings or Settings(trader.modes, trader.risk)
         self.lock = threading.Lock()
         self.state_dir = state_dir
         self.save_every = save_every
@@ -106,6 +110,10 @@ def make_handler(br: Bridge, token: Optional[str]):
             if path == "/status":
                 with br.lock:
                     return self._send(200, br.t.status())
+            if path == "/settings":
+                with br.lock:
+                    return self._send(200, {"values": br.settings.get(),
+                                            "help": {k: v[5] for k, v in SPEC.items()}})
             if path == "/actions":
                 with br.lock:
                     return self._send(200, {"actions": br.t.drain(), "mode": br.t.modes.effective})
@@ -125,6 +133,9 @@ def make_handler(br: Bridge, token: Optional[str]):
                     if path == "/mode":
                         return self._send(200, {"mode": br.t.set_mode(body["mode"]),
                                                 "effective": br.t.modes.effective})
+                    if path == "/settings":
+                        br.t.modes.presence()
+                        return self._send(200, {"values": br.settings.update(body)})
                     if path == "/presence":
                         br.t.modes.presence()
                         return self._send(200, {"online": True, "effective": br.t.modes.effective})
@@ -174,6 +185,8 @@ table{width:100%;border-collapse:collapse;font-size:12px}td,th{padding:4px;borde
 <div class="card"><div class="kpi" id="kpi"></div></div>
 <div class="card" id="pending"></div>
 <div class="card"><b>Semnale</b><div id="sigs"></div></div>
+<div class="card"><b>Setări</b><div id="sets" class="kpi" style="margin-top:8px"></div>
+<div class="row" style="margin-top:8px"><button onclick="saveSets()">Salvează setările</button><span class="mut" id="setmsg"></span></div></div>
 <div class="card"><b>Matricea învățată – top celule</b><table id="cells"></table></div>
 <script>
 const T=new URLSearchParams(location.search).get('t');const q=p=>p+(T?('?t='+T):'');
@@ -186,5 +199,10 @@ const e=s.engine;document.getElementById('kpi').innerHTML=[['Preț',s.price],['S
 document.getElementById('pending').innerHTML=s.pending.length?'<b>Așteaptă aprobarea ta</b>'+s.pending.map(p=>`<div class="card"><pre>${esc(p.text)}</pre><div class="row"><button class="ok" onclick="post('/decision',{sid:${p.sid},approve:true})">Aprob</button><button class="no" onclick="post('/decision',{sid:${p.sid},approve:false})">Refuz</button></div></div>`).join(''):'<span class="mut">Nicio aprobare în așteptare</span>';
 document.getElementById('sigs').innerHTML=s.signals.map(r=>`<div class="card"><span class="${r.side}">${r.side}</span> #${r.sid} @ ${r.entry.toFixed(1)} SL ${r.sl.toFixed(1)} TP ${r.tp.toFixed(1)} · <b>${r.status}</b> <span class="mut">${esc(r.why||'')}</span>${r.result?` · <b>${r.result} ${r.R>0?'+':''}${r.R}R</b>`:''}<pre>${esc(r.text)}${r.verdict?'\\n→ '+esc(r.verdict):''}</pre></div>`).join('')||'<span class="mut">încă nimic</span>';
 document.getElementById('cells').innerHTML='<tr><th>Celulă</th><th>Win</th><th>n</th><th>R mediu</th></tr>'+s.top_cells.map(c=>`<tr><td>${c.cell}</td><td>${(c.win*100).toFixed(0)}%</td><td>${c.n}</td><td>${c.avgR}</td></tr>`).join('');}
-load();setInterval(load,3000);
+async function loadSets(){const r=await (await fetch(q('/settings'))).json();
+document.getElementById('sets').innerHTML=Object.entries(r.values).map(([k,v])=>`<div><span class="mut">${esc(r.help[k])}</span><input data-k="${k}" value="${v}" style="width:100%;background:#21262d;color:#e6edf3;border:1px solid #30363d;border-radius:6px;padding:4px;margin-top:4px"></div>`).join('')}
+async function saveSets(){const b={};document.querySelectorAll('#sets input').forEach(i=>b[i.dataset.k]=i.value);
+const r=await fetch(q('/settings'),{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(b)});
+const j=await r.json();document.getElementById('setmsg').textContent=j.error?('⚠ '+j.error):' salvat ✓';loadSets()}
+load();loadSets();setInterval(load,3000);
 </script></body></html>"""

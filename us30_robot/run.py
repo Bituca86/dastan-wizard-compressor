@@ -7,6 +7,7 @@
   python run.py catalog                      # the 91 patterns
 """
 import argparse
+import os
 import sys
 
 from us30bot.engine import Engine, EngineConfig
@@ -14,6 +15,7 @@ from us30bot.feeds import csv_bars, synthetic_bars
 from us30bot.modes import ModeConfig, ModeController
 from us30bot.patterns import CATALOG, IMPLEMENTED, detect_all  # noqa: F401
 from us30bot.risk import RiskConfig, RiskManager
+from us30bot.settings import Settings
 from us30bot.trader import Trader
 
 
@@ -21,7 +23,12 @@ def build(a, paper: bool) -> Trader:
     eng = Engine.load(a.state, EngineConfig(explore=a.explore))
     modes = ModeController(a.mode, ModeConfig(), always_online=paper and a.mode != "ROBOT")
     risk = RiskManager(RiskConfig(risk_pct=a.risk, leverage=a.leverage))
-    return Trader(eng, modes, risk, paper=paper, balance=a.balance)
+    tr = Trader(eng, modes, risk, paper=paper, balance=a.balance)
+    tr.settings = Settings(modes, risk, os.path.join(a.state, "settings.json"))
+    tr.settings.load()  # values changed from dashboard / Telegram survive restarts
+    if "--risk" in sys.argv:
+        tr.settings.set("risk_pct", a.risk)
+    return tr
 
 
 def report(tr: Trader) -> None:
@@ -43,11 +50,11 @@ def report(tr: Trader) -> None:
 
 def main() -> int:
     ap = argparse.ArgumentParser()
-    ap.add_argument("cmd", choices=["serve", "backtest", "demo", "catalog"])
+    ap.add_argument("cmd", choices=["serve", "backtest", "demo", "catalog", "telegram-setup"])
     ap.add_argument("--csv")
     ap.add_argument("--state", default="state")
     ap.add_argument("--mode", default="AUTO", help="MANUAL | HIBRID | AUTO | ROBOT")
-    ap.add_argument("--risk", type=float, default=0.5, help="%% din sold riscat pe tranzacție")
+    ap.add_argument("--risk", type=float, default=1.0, help="%% din sold riscat pe tranzacție")
     ap.add_argument("--leverage", type=float, default=30.0)
     ap.add_argument("--balance", type=float, default=10000.0)
     ap.add_argument("--tz-shift", type=float, default=0.0, help="ore de adăugat ca să obții UTC")
@@ -56,6 +63,9 @@ def main() -> int:
     ap.add_argument("--host", default="127.0.0.1")
     ap.add_argument("--port", type=int, default=8765)
     ap.add_argument("--token")
+    ap.add_argument("--tg-token", help="token de la @BotFather (pentru telegram-setup)")
+    ap.add_argument("--tg-only-actionable", action="store_true",
+                    help="Telegram: doar semnale executate / de aprobat (fără cele MANUAL)")
     ap.add_argument("--quiet", action="store_true")
     a = ap.parse_args()
 
@@ -65,12 +75,27 @@ def main() -> int:
         print(f"\nDetectori activi pentru {len(IMPLEMENTED)}/{len(CATALOG)} pattern-uri.")
         return 0
 
+    if a.cmd == "telegram-setup":
+        from us30bot.telegram import setup
+        if not a.tg_token:
+            ap.error("--tg-token necesar (îl primești de la @BotFather)")
+        setup(a.tg_token, a.state)
+        return 0
+
     if a.cmd == "serve":
         from us30bot.server import Bridge, serve
+        from us30bot.telegram import TelegramBot, load_config
         if a.mode.upper() == "AUTO" and "--mode" not in sys.argv:
             a.mode = "MANUAL"  # safe default for live
         tr = build(a, paper=False)
-        serve(Bridge(tr, a.state), a.host, a.port, a.token)
+        br = Bridge(tr, a.state, settings=tr.settings)
+        tg = load_config(a.state)
+        if tg:
+            TelegramBot(tg["token"], tg["chat_id"], br, notify_all_signals=not a.tg_only_actionable).start()
+            print("Telegram activ.")
+        else:
+            print("Telegram neconfigurat (python run.py telegram-setup --tg-token ...).")
+        serve(br, a.host, a.port, a.token)
         return 0
 
     tr = build(a, paper=True)

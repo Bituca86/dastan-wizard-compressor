@@ -33,7 +33,7 @@ namespace cAlgo.Robots
         [Parameter("Mod la pornire", DefaultValue = MxMode.MANUAL, Group = "Mod")]
         public MxMode StartMode { get; set; }
 
-        [Parameter("Risc maxim % / tranzacție", DefaultValue = 1.0, MinValue = 0.05, MaxValue = 3.0, Group = "Risc")]
+        [Parameter("Risc maxim % / tranzacție", DefaultValue = 2.0, MinValue = 0.05, MaxValue = 3.0, Group = "Risc")]
         public double MaxRiskPercent { get; set; }
 
         [Parameter("Leverage", DefaultValue = 30, MinValue = 1, Group = "Risc")]
