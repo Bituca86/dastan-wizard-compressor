@@ -128,6 +128,7 @@ namespace cAlgo.Robots
             if (!string.IsNullOrWhiteSpace(RobotFolder)) cands.Add(RobotFolder.Trim().Trim('"'));
             string docs = Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments);
             cands.Add(System.IO.Path.Combine(docs, "us30_robot"));
+            cands.Add(System.IO.Path.Combine(docs, "cAlgo", "Sources", "Robots", "us30_robot"));
             cands.Add(System.IO.Path.Combine(docs, "US30MX", "us30_robot"));
             cands.Add(System.IO.Path.Combine(docs, "dastan-wizard-compressor", "us30_robot"));
             foreach (var c in cands)
