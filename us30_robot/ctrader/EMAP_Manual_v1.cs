@@ -195,7 +195,7 @@ namespace cAlgo.Robots
                 var p = s.Pos; if (p == null) continue;
                 if (PilotOnStop && !_pilot)
                 {
-                    try { ModifyPosition(p, R(s.VSl), s.VTp.HasValue ? R(s.VTp.Value) : (double?)null); s.ExpSl = R(s.VSl); s.ExpTp = s.VTp; }
+                    try { ModifyPosition(p, R(s.VSl), s.VTp.HasValue ? R(s.VTp.Value) : (double?)null, ProtectionType.Absolute); s.ExpSl = R(s.VSl); s.ExpTp = s.VTp; }
                     catch { }
                 }
                 Save(s);
@@ -448,7 +448,7 @@ namespace cAlgo.Robots
             if (Eq(p.StopLoss, dSl) && Eq(p.TakeProfit, dTp)) { s.ExpSl = p.StopLoss; s.ExpTp = p.TakeProfit; return; }
 
             s.Pending = true; s.PendSince = DateTime.UtcNow; s.ExpSl = dSl; s.ExpTp = dTp;
-            ModifyPositionAsync(p, dSl, dTp, r =>
+            ModifyPositionAsync(p, dSl, dTp, ProtectionType.Absolute, r =>
             {
                 s.Pending = false;
                 if (!r.IsSuccessful)
