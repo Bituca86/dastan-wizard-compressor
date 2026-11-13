@@ -1,11 +1,12 @@
 // =====================================================================================
-//  EMAP_Manual_v1 (v1.3: TRAILING cu PAS dupa ultimul LOCK)  —  derivat din EMA_Proiectie_Bot v8.8
+//  EMAP_Manual_v1 (v1.4: TRAILING cu PAS + PROFILURI LOCK)  —  derivat din EMA_Proiectie_Bot v8.8
 //  Gestioneaza DOAR pozitiile manuale (fara label) de pe simbolul graficului:
 //    • SL virtual: SL-ul tau daca il pui, altfel distanta fixa
 //    • TP virtual optional (automat / pus de tine / din panou), cu LOCK-uri on/off la TP
 //    • LOCK1 / LOCK2 / LOCK3 — in puncte SAU in % din TP (selectabil)
 //    • TRAILING dupa ultimul LOCK: la fiecare PAS de profit in plus, SL urca cu PAS
 //      (distanta pret-SL ramane cea de la ultimul LOCK); SL doar se strange
+//    • PROFIL LOCK: Personalizat (parametrii tai) / Rapid / Echilibrat / Trend
 //    • Executie virtuala + SL de catastrofa pe server; PILOT (niveluri pe server)
 //    • Panou compact: 1 rand / pozitie
 //  Paralel: nu atinge pozitiile cu label (alti roboti), obiecte grafice cu prefix unic,
@@ -24,6 +25,7 @@ namespace cAlgo.Robots
     public enum EmmExec { Virtual = 0, Server = 1 }
     public enum EmmLock { Puncte = 0, ProcentTP = 1 }
     public enum EmmColt { StangaSus = 0, DreaptaSus = 1, StangaJos = 2, DreaptaJos = 3 }
+    public enum EmmProfil { Personalizat = 0, Rapid = 1, Echilibrat = 2, Trend = 3 }
 
     [Robot(AccessRights = AccessRights.None, TimeZone = TimeZones.UTC)]
     public class EMAP_Manual_v1 : Robot
@@ -81,6 +83,9 @@ namespace cAlgo.Robots
         public bool TpLocks { get; set; }
 
         // ------------------------------- LOCK ---------------------------------------
+        [Parameter("Profil LOCK (Personalizat = valorile de mai jos)", Group = "LOCK", DefaultValue = EmmProfil.Personalizat)]
+        public EmmProfil Profil { get; set; }
+
         [Parameter("Mod LOCK", Group = "LOCK", DefaultValue = EmmLock.Puncte)]
         public EmmLock LockMode { get; set; }
 
@@ -149,6 +154,7 @@ namespace cAlgo.Robots
             _pilot = Exec == EmmExec.Server;
             _tol = Symbol.TickSize * 0.5;
             _useStore = !IsBacktesting;
+            ApplyProfile();
             _labels = new HashSet<string>((ExtraLabels ?? "").Split(new[] { ',', ';' }, StringSplitOptions.RemoveEmptyEntries)
                                           .Select(s => s.Trim()).Where(s => s.Length > 0));
 
@@ -196,6 +202,31 @@ namespace cAlgo.Robots
                 StoreRemove("EMM_OWN_" + s.Id);
             }
             StoreFlush();
+        }
+
+        // =============================== Profiluri LOCK ====================================
+        // Valori in puncte (US30). Simulare pe US30 M1 ICMarkets iun-nov 2026: cu cat lock-urile
+        // sunt mai stranse, cu atat mai multe iesiri pe profit mic; TRAILING-ul a adaugat profit
+        // in toate variantele.
+        private void ApplyProfile()
+        {
+            if (Profil == EmmProfil.Personalizat) return;
+            LockMode = EmmLock.Puncte;
+            L1On = L2On = L3On = true;
+            TrailOn = true;
+            switch (Profil)
+            {
+                case EmmProfil.Rapid:      SetLocks(6, 3, 9, 6, 12, 9, 2); break;      // iesiri rapide, profit mic
+                case EmmProfil.Echilibrat: SetLocks(10, 2, 15, 6, 20, 11, 3); break;
+                case EmmProfil.Trend:      SetLocks(15, 2, 25, 12, 35, 25, 3); break;  // tine trendul, cedeaza mai mult
+            }
+            Event("Profil " + Profil + ": LOCK " + L1Trig + "/" + L1Sl + " · " + L2Trig + "/" + L2Sl + " · "
+                  + L3Trig + "/" + L3Sl + " · PAS " + TrailStep);
+        }
+
+        private void SetLocks(double t1, double s1, double t2, double s2, double t3, double s3, double step)
+        {
+            L1Trig = t1; L1Sl = s1; L2Trig = t2; L2Sl = s2; L3Trig = t3; L3Sl = s3; TrailStep = step;
         }
 
         // =============================== Selectie & rezervare ===============================
@@ -647,7 +678,7 @@ namespace cAlgo.Robots
                 sumNet += s.Pos.NetProfit;
             }
 
-            _hdr.Text = $"EMAP_Manual v1.3 | {(_pilot ? "✈ PILOT" : "VIRTUAL")} | LOCK: {(LockMode == EmmLock.Puncte ? "puncte" : "% din TP")}"
+            _hdr.Text = $"EMAP_Manual v1.4 | {Profil} | {(_pilot ? "✈ PILOT" : "VIRTUAL")} | LOCK: {(LockMode == EmmLock.Puncte ? "puncte" : "% din TP")}"
                         + (TrailOn ? $" | TRAIL pas {(LockMode == EmmLock.Puncte ? TrailStep.ToString("0.#", IC) + " pct" : TrailStepP.ToString("0.#", IC) + "% TP")}" : " | fara TRAIL")
                         + (TpOn ? $" | TP auto {TpPts:0.#}" : " | fara TP auto");
             if (list.Count == 0)
