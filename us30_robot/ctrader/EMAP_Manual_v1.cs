@@ -1,9 +1,11 @@
 // =====================================================================================
-//  EMAP_Manual_v1 (v1.2: panou ca EMA_Proiectie_Bot v8.7)  —  derivat din EMA_Proiectie_Bot v8.8
+//  EMAP_Manual_v1 (v1.3: TRAILING cu PAS dupa ultimul LOCK)  —  derivat din EMA_Proiectie_Bot v8.8
 //  Gestioneaza DOAR pozitiile manuale (fara label) de pe simbolul graficului:
 //    • SL virtual: SL-ul tau daca il pui, altfel distanta fixa
 //    • TP virtual optional (automat / pus de tine / din panou), cu LOCK-uri on/off la TP
 //    • LOCK1 / LOCK2 / LOCK3 — in puncte SAU in % din TP (selectabil)
+//    • TRAILING dupa ultimul LOCK: la fiecare PAS de profit in plus, SL urca cu PAS
+//      (distanta pret-SL ramane cea de la ultimul LOCK); SL doar se strange
 //    • Executie virtuala + SL de catastrofa pe server; PILOT (niveluri pe server)
 //    • Panou compact: 1 rand / pozitie
 //  Paralel: nu atinge pozitiile cu label (alti roboti), obiecte grafice cu prefix unic,
@@ -105,6 +107,11 @@ namespace cAlgo.Robots
         [Parameter("LOCK3 activare (% din TP)", Group = "LOCK in % din TP", DefaultValue = 85.0, MinValue = 1, MaxValue = 99)] public double L3TrigP { get; set; }
         [Parameter("LOCK3 SL (% din TP)", Group = "LOCK in % din TP", DefaultValue = 70.0, MinValue = -100, MaxValue = 99)] public double L3SlP { get; set; }
 
+        // ------------------------------- TRAILING dupa ultimul LOCK ------------------
+        [Parameter("TRAILING dupa ultimul LOCK", Group = "TRAILING (PAS)", DefaultValue = true)] public bool TrailOn { get; set; }
+        [Parameter("PAS in puncte (mod LOCK = puncte)", Group = "TRAILING (PAS)", DefaultValue = 3.0, MinValue = 0.1)] public double TrailStep { get; set; }
+        [Parameter("PAS in % din TP (mod LOCK = % din TP)", Group = "TRAILING (PAS)", DefaultValue = 10.0, MinValue = 0.5, MaxValue = 100)] public double TrailStepP { get; set; }
+
         // ------------------------------- Panou --------------------------------------
         [Parameter("Panou: colt initial", Group = "Panou", DefaultValue = EmmColt.StangaSus)] public EmmColt PanelCorner { get; set; }
         [Parameter("Panou: distanta X fata de colt", Group = "Panou", DefaultValue = 10, MinValue = 0)] public int PanelX { get; set; }
@@ -116,7 +123,7 @@ namespace cAlgo.Robots
         private class St
         {
             public long Id; public Position Pos; public bool Buy;
-            public double VSl; public double? VTp; public int Lvl; public bool LocksOn = true;
+            public double VSl; public double? VTp; public int Lvl; public bool LocksOn = true; public int TrailK;
             public double? ExpSl, ExpTp;            // ce stim ca e pe server (detectie modificari tale)
             public bool Pending; public DateTime PendSince, FailUntil;
             public bool Closing; public DateTime CloseTry; public int CloseTries; public string CloseWhy = "";
@@ -318,6 +325,55 @@ namespace cAlgo.Robots
                 s.Lvl = i; s.Dirty = true;
                 Event("#" + s.Id + " LOCK" + i + " · SL v " + F(s.VSl));
             }
+            ApplyTrail(s, px, e, prof);
+        }
+
+        // ultimul LOCK activat din parametri (1..3), 0 daca niciunul
+        private int LastLock(St s)
+        {
+            for (int i = 3; i >= 1; i--) if (LockDef(i, s, out _, out _)) return i;
+            return 0;
+        }
+
+        private double Step(St s)
+        {
+            if (LockMode == EmmLock.Puncte) return TrailStep;
+            double refd = s.VTp.HasValue ? Math.Abs(s.VTp.Value - s.Pos.EntryPrice) : RefTpPts;
+            return Math.Max(Symbol.TickSize, refd * TrailStepP / 100.0);
+        }
+
+        // TRAILING: dupa ultimul LOCK, la fiecare PAS de profit in plus SL urca cu un PAS
+        private void ApplyTrail(St s, double px, double e, double prof)
+        {
+            int last = LastLock(s);
+            if (!TrailOn || last == 0 || s.Lvl < last) return;
+            if (!LockDef(last, s, out double trig, out double off)) return;
+            double step = Step(s);
+            int k = (int)Math.Floor((prof - trig) / step);
+            if (k < 1) return;
+            double ns = R(s.Buy ? e + off + k * step : e - off - k * step);
+            double gap = s.Buy ? px - ns : ns - px;
+            if (gap < LockMinGap) return;                                      // reincearca la tick-ul urmator
+            if (s.Buy ? ns > s.VSl + _tol : ns < s.VSl - _tol)
+            {
+                s.VSl = ns; s.Dirty = true;
+                if (k > s.TrailK) Event("#" + s.Id + " TRAIL pas " + k + " · SL v " + F(s.VSl));
+            }
+            if (k > s.TrailK) s.TrailK = k;
+        }
+
+        // urmatorul pas de trailing (pentru panou)
+        private bool NextTrail(St s, out int k, out double atPts, out double slPts)
+        {
+            k = 0; atPts = slPts = 0;
+            int last = LastLock(s);
+            if (!TrailOn || last == 0 || s.Lvl < last || !LockDef(last, s, out double trig, out double off)) return false;
+            double step = Step(s);
+            double prof = s.Buy ? Symbol.Bid - s.Pos.EntryPrice : s.Pos.EntryPrice - Symbol.Ask;
+            k = Math.Max(0, (int)Math.Floor((prof - trig) / step)) + 1;
+            atPts = trig + k * step;
+            slPts = off + k * step;
+            return true;
         }
 
         private void CheckExit(St s, double px)
@@ -591,7 +647,8 @@ namespace cAlgo.Robots
                 sumNet += s.Pos.NetProfit;
             }
 
-            _hdr.Text = $"EMAP_Manual v1.2 | {(_pilot ? "✈ PILOT" : "VIRTUAL")} | LOCK: {(LockMode == EmmLock.Puncte ? "puncte" : "% din TP")}"
+            _hdr.Text = $"EMAP_Manual v1.3 | {(_pilot ? "✈ PILOT" : "VIRTUAL")} | LOCK: {(LockMode == EmmLock.Puncte ? "puncte" : "% din TP")}"
+                        + (TrailOn ? $" | TRAIL pas {(LockMode == EmmLock.Puncte ? TrailStep.ToString("0.#", IC) + " pct" : TrailStepP.ToString("0.#", IC) + "% TP")}" : " | fara TRAIL")
                         + (TpOn ? $" | TP auto {TpPts:0.#}" : " | fara TP auto");
             if (list.Count == 0)
             {
@@ -647,7 +704,7 @@ namespace cAlgo.Robots
             // SL
             double slPts = dir * (s.VSl - e), toSl = dir * (px - s.VSl);
             k.Sl.Text = $"SL  {F(s.VSl)}   ({slPts:+0.0;-0.0;0.0} · {slPts * perPt:+0.00;-0.00;0.00} {cur})   mai sunt {Math.Max(0, toSl):0.0}"
-                        + (s.Lvl > 0 ? $"   LOCK{s.Lvl} ✓" : "");
+                        + (s.Lvl > 0 ? $"   LOCK{s.Lvl} ✓" : "") + (s.TrailK > 0 ? $"  TRAIL {s.TrailK} ✓" : "");
             k.Sl.ForegroundColor = slPts >= 0 ? CGreen : COrange;
 
             // urmatorul prag
@@ -660,6 +717,12 @@ namespace cAlgo.Robots
                 k.Next.Text = $"▶ LOCK{li} la {F(e + dir * atPts)} ({atPts:+0.0;-0.0;0.0}) · mai sunt {Math.Max(0, atPts - pts):0.0} → SL {F(e + dir * nSlPts)} ({nSlPts:+0.0;-0.0;0.0})";
                 k.Next.ForegroundColor = CText;
                 nextLvl = atPts;
+            }
+            else if (NextTrail(s, out int tk, out double tAt, out double tSl))
+            {
+                k.Next.Text = $"▶ TRAIL pas {tk} la {F(e + dir * tAt)} ({tAt:+0.0;-0.0;0.0}) · mai sunt {Math.Max(0, tAt - pts):0.0} → SL {F(e + dir * tSl)} ({tSl:+0.0;-0.0;0.0})";
+                k.Next.ForegroundColor = CText;
+                nextLvl = tAt;
             }
             else { k.Next.Text = s.VTp.HasValue ? "▶ toate LOCK-urile aplicate – urmeaza TP" : "▶ toate LOCK-urile aplicate"; k.Next.ForegroundColor = CMuted; }
 
