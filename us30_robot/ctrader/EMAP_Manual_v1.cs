@@ -216,7 +216,7 @@ namespace cAlgo.Robots
             TrailOn = true;
             switch (Profil)
             {
-                case EmmProfil.Rapid:      SetLocks(6, 3, 9, 6, 12, 9, 2); break;      // iesiri rapide, profit mic
+                case EmmProfil.Rapid:      SetLocks(6, 3, 9, 6, 12, 9, 3); break;      // iesiri rapide; PAS = pasul dintre lock-uri
                 case EmmProfil.Echilibrat: SetLocks(10, 2, 15, 6, 20, 11, 3); break;
                 case EmmProfil.Trend:      SetLocks(15, 2, 25, 12, 35, 25, 3); break;  // tine trendul, cedeaza mai mult
             }
