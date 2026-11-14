@@ -38,7 +38,7 @@ def make():
         eng.on_bar(b)
     tr = Trader(eng, ModeController("HIBRID", always_online=True), RiskManager())
     d = tempfile.mkdtemp()
-    tr.settings = Settings(tr.modes, tr.risk, os.path.join(d, "settings.json"))
+    tr.settings = Settings(tr.modes, tr.risk, os.path.join(d, "settings.json"), engine_cfg=eng.cfg)
     return tr, Bridge(tr, d, settings=tr.settings), d
 
 

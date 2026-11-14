@@ -15,6 +15,8 @@ from .risk import RiskManager
 SPEC: Dict[str, Tuple[str, str, float, float, type, str]] = {
     "min_prob": ("engine", "min_prob", 0.3, 0.95, float, "semnal: probabilitate minimă de succes"),
     "min_expectancy_r": ("engine", "min_expectancy_r", 0.0, 3.0, float, "semnal: expectanță minimă (R, după spread)"),
+    "confirmare_indicator": ("engine", "indicator_filter", 0, 2, int,
+                             "confirmare indicator EMA: 0 = oprit, 1 = blând, 2 = strict"),
     "risk_pct": ("risk", "risk_pct", 0.05, 3.0, float, "risc % din sold pe tranzacție"),
     "max_daily_loss_pct": ("risk", "max_daily_loss_pct", 0.5, 10.0, float, "oprire la pierdere zilnică %"),
     "max_trades_day": ("risk", "max_trades_day", 1, 50, int, "maxim tranzacții pe zi"),

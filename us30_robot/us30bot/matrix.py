@@ -82,6 +82,12 @@ def explain(direction: str, dets: List[Detection], ctx: Dict[str, str], p: float
     pd_txt = {"ok": "zonă favorabilă (discount/premium corect)", "bad": "zonă nefavorabilă",
               "eq": "la echilibru"}[ctx["pd"]]
     lines.append(f"  Context: sesiune {ctx['session']}, {ctx_txt}, {pd_txt}.")
+    ind = ctx.get("ind")
+    if ind:
+        ind_txt = {"CONFIRMAT": "CONFIRMAT (M2 și M5 în sensul semnalului)", "slab": "slab (M2 în sens, M5 lateral)",
+                   "M2 contra": "M2 în sens opus", "M2 stop": "M2 în schimbare de trend",
+                   "M5 contra": "M5 în sens opus"}[ind]
+        lines.append(f"  Indicator EMA 2/5/10: {ind_txt}.")
     for key, mean, n in cell_stats:
         lines.append(f"  Istoric celulă [{key}]: win-rate {mean:.0%} din {n:.0f} cazuri (ponderat).")
     return "\n".join(lines)

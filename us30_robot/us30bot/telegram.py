@@ -24,7 +24,7 @@ API = "https://api.telegram.org/bot{token}/{method}"
 
 HELP = ("Comenzi:\n/status – situația curentă\n/mod MANUAL|HIBRID|AUTO|ROBOT\n/online – sunt aici\n"
         "/risc 1.0 – risc % pe tranzacție\n/prag 0.60 0.40 – HIBRID: P și expectanță pt. execuție automată\n"
-        "/robot 0.55 0.50 – praguri ROBOT\n/jurnal [n] – ultimele semnale și rezultate\n/setari – toate setările\n/set <cheie> <valoare>")
+        "/robot 0.55 0.50 – praguri ROBOT\n/jurnal [n] – ultimele semnale și rezultate\n/filtru oprit|bland|strict – confirmare indicator EMA\n/setari – toate setările\n/set <cheie> <valoare>")
 
 
 def http_transport(token: str) -> Callable[[str, dict, float], dict]:
@@ -229,6 +229,13 @@ class TelegramBot:
                         else:
                             out.append(f"   💰 #{r['sid']} {r['pnl']} ({r['detalii']})")
                     return "Jurnal (ultimele evenimente):\n" + "\n".join(out[-40:])
+                if cmd == "/filtru":
+                    lv = {"oprit": 0, "off": 0, "0": 0, "bland": 1, "blând": 1, "1": 1, "strict": 2, "2": 2}
+                    names = ["OPRIT", "BLÂND (fără „M2 stop” și „M5 contra”)", "STRICT (doar CONFIRMAT: M2 + M5 în sens)"]
+                    if args and args[0].lower() in lv:
+                        s.set("confirmare_indicator", lv[args[0].lower()])
+                    cur = int(s.get().get("confirmare_indicator", 0))
+                    return f"Confirmare indicator EMA: {names[cur]}\nSchimbi cu /filtru oprit | bland | strict"
                 if cmd == "/setari":
                     return s.describe()
                 if cmd == "/set" and len(args) == 2:

@@ -151,6 +151,20 @@ Toate detecțiile brute, nefiltrate, au în medie −0,07R după spread. Pattern
 avantajul vine din filtrarea matricei (context + istoricul fiecărei celule). 5 luni înseamnă un eșantion mic:
 **rezultatele trecute nu garantează nimic**, testează pe demo înainte de bani reali.
 
+## Confirmarea indicatorului EMA 2/5/10 (setarea `confirmare_indicator`)
+
+Robotul calculează singur starea EMA 2/5/10 pe M2 și trendul EMA pe M5 (aceleași definiții ca indicatorul
+`US30_EMA10_Virtual`, sens „Trend”) și poate filtra semnalele după ele. Rulat pe iun–nov 2026 (ICMarkets, M1):
+
+| Treaptă | Semnale | Total | Medie | PF | Drawdown | iun–aug | sep–nov |
+|---|---|---|---|---|---|---|---|
+| 0 – oprit | 335 | +62,2R | +0,19R | 1,36 | 14,8R | +26,0R | +36,2R |
+| **1 – blând (implicit)**: fără „M2 stop” și fără „M5 contra” | 305 | +74,6R | +0,25R | 1,50 | 12,5R | +26,5R | +48,1R |
+| 2 – strict: doar „CONFIRMAT” (M2 și M5 în sensul semnalului) | 131 | +36,2R | +0,28R | 1,60 | 7,9R | +13,4R | +22,8R |
+
+Filtrul a fost ales după ce au fost văzute toate cele 5 luni, deci câștigul față de „oprit” e probabil
+supraestimat; treapta se schimbă din dashboard, cu `/filtru oprit|bland|strict` în Telegram sau din `settings.json`.
+
 ## Revizie cu metode avansate (noiembrie 2026) – ce s-a testat și ce a ieșit
 
 Toate cele 73.196 de detecții din iun–nov 2026 au fost transformate într-un set de date (42 de caracteristici

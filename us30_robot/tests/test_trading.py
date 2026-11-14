@@ -241,3 +241,38 @@ class TestDetectionLog(unittest.TestCase):
         k = HEAD.index("pid")
         self.assertTrue(all(1 <= float(r[k]) <= 91 for r in rows[1:]))
         self.assertEqual(len(RICH_NAMES), len(set(RICH_NAMES)))
+
+
+class TestIndicatorFilter(unittest.TestCase):
+    def test_kinds_and_levels(self):
+        from us30bot.engine import indicator_kind
+        self.assertEqual(indicator_kind(1, 1), "CONFIRMAT")
+        self.assertEqual(indicator_kind(1, 0), "slab")
+        self.assertEqual(indicator_kind(1, -1), "M5 contra")
+        self.assertEqual(indicator_kind(0, 1), "M2 stop")
+        self.assertEqual(indicator_kind(-1, 1), "M2 contra")
+        self.assertEqual(EngineConfig().indicator_filter, 1)          # default: mild
+        seen = {}
+        for lvl in (0, 1, 2):
+            eng = Engine(EngineConfig(indicator_filter=lvl, min_prob=0.0, min_expectancy_r=-5))
+            kinds = []
+            eng.on_signal.append(lambda s, k=kinds: k.append(s.context["ind"]))
+            for b in synthetic_bars(8000, seed=11):
+                eng.on_bar(b)
+            seen[lvl] = set(kinds)
+            self.assertGreater(len(kinds), 0)
+        self.assertTrue(seen[2] <= {"CONFIRMAT"})
+        self.assertFalse(seen[1] & {"M2 stop", "M5 contra"})
+
+    def test_setting_and_telegram_command(self):
+        from tests.test_telegram_settings import make, FakeTG
+        from us30bot.telegram import TelegramBot
+        tr, br, _ = make()
+        self.assertEqual(br.settings.get()["confirmare_indicator"], 1)
+        bot = TelegramBot("x", 42, br, transport=FakeTG())
+        self.assertIn("STRICT", bot.command("/filtru strict"))
+        self.assertEqual(tr.eng.cfg.indicator_filter, 2)
+        self.assertIn("OPRIT", bot.command("/filtru oprit"))
+        self.assertEqual(tr.eng.cfg.indicator_filter, 0)
+        with self.assertRaises(ValueError):
+            br.settings.set("confirmare_indicator", 5)

@@ -11,6 +11,7 @@ from typing import Callable, Dict, List, Optional
 from .context import MarketState, SessionClock, SpreadModel
 from .evaluator import Evaluator, Tracked
 from .learner import Learner
+from .emastack import EmaStack
 from .features import rich_features
 from .matrix import cell_key, cluster, context_of, explain, family_key, features
 from .models import BUY, Bar, Detection, Outcome, Signal
@@ -24,6 +25,9 @@ class EngineConfig:
     min_prob: float = 0.50
     min_expectancy_r: float = 0.30
     min_cell_samples: float = 0.0  # 0 = allow trading from family/global prior
+    # Confirmation by the EMA 2/5/10 indicator (M2 state + M5 trend), tested on Jun-Nov 2026 ICMarkets data:
+    #   0 = off · 1 = mild (skip "M2 stop" and "M5 against") · 2 = strict (M2 and M5 both in the signal direction)
+    indicator_filter: int = 1
     explore: bool = False  # Thompson sampling (paper trading accelerates learning)
     cooldown_bars: int = 5  # same pattern/direction re-fire suppression
     one_position: bool = True
@@ -32,6 +36,15 @@ class EngineConfig:
     sessions: SessionClock = field(default_factory=SessionClock)
     spread: SpreadModel = field(default_factory=SpreadModel)  # ICMarkets: 0.7 NYSE / 1.2 otherwise
     allowed_sessions: tuple = ("london", "ny_open", "ny")
+
+
+def indicator_kind(m2: int, m5: int) -> str:
+    """Reading of the EMA indicator relative to a signal (m2 / m5: +1 with it, -1 against, 0 neutral)."""
+    if m2 == 0:
+        return "M2 stop"
+    if m2 < 0:
+        return "M2 contra"
+    return "CONFIRMAT" if m5 > 0 else "M5 contra" if m5 < 0 else "slab"
 
 
 class HTFAggregator:
@@ -63,6 +76,8 @@ class Engine:
         self.st = MarketState(self.cfg.sessions)
         self.htf = MarketState(self.cfg.sessions, zz_mult=1.0)
         self.st.htf = self.htf
+        self.ema5, self.ema2 = EmaStack(5), EmaStack(2)   # as in the US30_EMA10_Virtual indicator
+        self.filtered = 0                                  # signals skipped by the indicator filter
         self.agg = HTFAggregator(self.cfg.htf_minutes)
         self.learner = learner or Learner(half_life=self.cfg.half_life)
         self.ev = Evaluator(self.cfg.timeout_bars)
@@ -90,6 +105,8 @@ class Engine:
         h = self.agg.update(bar)
         if h is not None:
             self.htf.update(h)
+        self.ema5.update(bar)
+        self.ema2.update(bar)
         self.ev.update(st.i, bar)
         if st.atr.value:
             self._atr_hist.append(st.atr.value)
@@ -166,6 +183,14 @@ class Engine:
         exp_r, p, n, d, ctx, cell, fam, x = best
         if p < cfg.min_prob or exp_r < cfg.min_expectancy_r or n < cfg.min_cell_samples:
             return None
+        sg = 1 if d.direction == BUY else -1
+        m2, m5 = self.ema2.state() * sg, self.ema5.trend() * sg     # +1 in the signal direction, -1 against
+        kind = indicator_kind(m2, m5)
+        lvl = cfg.indicator_filter
+        if (lvl >= 2 and kind != "CONFIRMAT") or (lvl == 1 and kind in ("M2 stop", "M5 contra")):
+            self.filtered += 1
+            return None
+        ctx = dict(ctx, ind=kind)
         self._seq += 1
         same = groups[d.direction]
         stats = []
