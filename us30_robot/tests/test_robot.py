@@ -90,7 +90,8 @@ class TestEvaluator(unittest.TestCase):
 class TestLearner(unittest.TestCase):
     def test_learns_and_persists(self):
         L = Learner(half_life=1e9)
-        x = [1.0] * 14
+        from us30bot.matrix import FEATURE_NAMES
+        x = [1.0] * len(FEATURE_NAMES)
         p0, _ = L.score("c", "F|BUY", x)
         for _ in range(40):
             L.update("c", "F|BUY", x, True, 2.0, {1.0: True, 2.0: True, 3.0: False})
