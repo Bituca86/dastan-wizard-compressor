@@ -1,4 +1,5 @@
 import json
+import os
 import threading
 import unittest
 import urllib.request
@@ -189,3 +190,33 @@ class TestWarmupStats(unittest.TestCase):
         br.warmup(bars)
         self.assertEqual(eng.summary()["signals"], 0)
         self.assertGreater(eng.learner.updates, 0)
+
+
+class TestJournal(unittest.TestCase):
+    def test_csv_journal_and_history_survive_restart(self):
+        import csv, tempfile
+        from us30bot.journal import CsvJournal
+        d = tempfile.mkdtemp()
+        eng = Engine(EngineConfig(min_prob=0.0, min_expectancy_r=-5))
+        tr = Trader(eng, ModeController("AUTO", always_online=True), RiskManager(), paper=True)
+        j = CsvJournal(os.path.join(d, "jurnal.csv"), tr)
+        tr.listeners.append(j.on_action)
+        for b in synthetic_bars(6000, seed=6):
+            tr.on_bar(b)
+        eng.save(d)
+        with open(os.path.join(d, "jurnal.csv"), encoding="utf-8-sig") as fh:
+            rows = list(csv.DictReader(fh, delimiter=";"))
+        kinds = {r["eveniment"] for r in rows}
+        self.assertIn("PROPUS", kinds)
+        self.assertIn("REZULTAT", kinds)
+        self.assertTrue(all(r["directie"] in ("BUY", "SELL") for r in rows if r["eveniment"] == "REZULTAT"))
+        n, last_id = len(eng.journal), eng._seq
+        self.assertGreater(n, 0)
+        eng2 = Engine.load(d)                       # restart: history and numbering continue
+        self.assertEqual(len(eng2.journal), n)
+        self.assertEqual(eng2._seq, last_id)
+        j2 = CsvJournal(os.path.join(d, "jurnal.csv"))   # reopening must not truncate
+        j2.on_action({"type": "breaker", "why": "test"})
+        with open(os.path.join(d, "jurnal.csv"), encoding="utf-8-sig") as fh:
+            self.assertEqual(len(list(csv.DictReader(fh, delimiter=";"))), len(rows) + 1)
+        self.assertEqual(j2.tail(1)[0]["eveniment"], "OPRIRE")

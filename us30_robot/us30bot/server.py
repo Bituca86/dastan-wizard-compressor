@@ -46,6 +46,7 @@ class Bridge:
         self.save_every = save_every
         self._n = 0
         self.on_shutdown = None  # set by serve()
+        self.journal = None      # CsvJournal, set by run.py serve
 
     def warmup(self, bars) -> dict:
         with self.lock:
@@ -121,6 +122,12 @@ def make_handler(br: Bridge, token: Optional[str]):
             if path == "/status":
                 with br.lock:
                     return self._send(200, br.t.status())
+            if path == "/jurnal.csv":
+                try:
+                    with open(br.journal.path, "rb") as fh:
+                        return self._send(200, fh.read(), "text/csv")
+                except (AttributeError, OSError):
+                    return self._send(404, {"error": "jurnal indisponibil"})
             if path == "/settings":
                 with br.lock:
                     return self._send(200, {"values": br.settings.get(),
@@ -203,7 +210,8 @@ table{width:100%;border-collapse:collapse;font-size:12px}td,th{padding:4px;borde
 <h1>US30 M1 · Matrix Robot</h1>
 <div class="card"><div class="row" id="modes"></div>
 <div class="mut" id="eff" style="margin-top:8px"></div>
-<div class="row" style="margin-top:8px"><button onclick="post('/presence',{})">Sunt online</button></div></div>
+<div class="row" style="margin-top:8px"><button onclick="post('/presence',{})">Sunt online</button>
+<a id="jl" href="/jurnal.csv" download="jurnal_US30.csv" style="color:#58a6ff;font-weight:600">Descarcă jurnalul (CSV / Excel)</a></div></div>
 <div class="card"><div class="kpi" id="kpi"></div></div>
 <div class="card" id="pending"></div>
 <div class="card"><b>Semnale</b><div id="sigs"></div></div>
@@ -226,5 +234,6 @@ document.getElementById('sets').innerHTML=Object.entries(r.values).map(([k,v])=>
 async function saveSets(){const b={};document.querySelectorAll('#sets input').forEach(i=>b[i.dataset.k]=i.value);
 const r=await fetch(q('/settings'),{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(b)});
 const j=await r.json();document.getElementById('setmsg').textContent=j.error?('⚠ '+j.error):' salvat ✓';loadSets()}
+document.getElementById('jl').href=q('/jurnal.csv');
 load();loadSets();setInterval(load,3000);
 </script></body></html>"""

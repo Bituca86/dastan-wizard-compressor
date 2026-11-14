@@ -24,7 +24,7 @@ API = "https://api.telegram.org/bot{token}/{method}"
 
 HELP = ("Comenzi:\n/status – situația curentă\n/mod MANUAL|HIBRID|AUTO|ROBOT\n/online – sunt aici\n"
         "/risc 1.0 – risc % pe tranzacție\n/prag 0.60 0.40 – HIBRID: P și expectanță pt. execuție automată\n"
-        "/robot 0.55 0.50 – praguri ROBOT\n/setari – toate setările\n/set <cheie> <valoare>")
+        "/robot 0.55 0.50 – praguri ROBOT\n/jurnal [n] – ultimele semnale și rezultate\n/setari – toate setările\n/set <cheie> <valoare>")
 
 
 def http_transport(token: str) -> Callable[[str, dict, float], dict]:
@@ -214,6 +214,21 @@ class TelegramBot:
                     s.set("robot_min_prob", args[0])
                     s.set("robot_min_exp", args[1])
                     return f"ROBOT: P ≥ {args[0]}, expectanță ≥ {args[1]}R"
+                if cmd == "/jurnal":
+                    j = getattr(self.br, "journal", None)
+                    n = int(args[0]) if args and args[0].isdigit() else 10
+                    rows = [r for r in (j.tail(400) if j else []) if r["eveniment"] in ("PROPUS", "REZULTAT", "INCHIS")][-n * 3:]
+                    if not rows:
+                        return "Jurnalul e gol deocamdată."
+                    out = []
+                    for r in rows:
+                        if r["eveniment"] == "PROPUS":
+                            out.append(f"{r['data_ora'][5:16]} #{r['sid']} {r['directie']} @ {r['intrare']} [{r['mod']}: {r['stare']}]")
+                        elif r["eveniment"] == "REZULTAT":
+                            out.append(f"   ↳ #{r['sid']} {r['rezultat']} {r['R']}R")
+                        else:
+                            out.append(f"   💰 #{r['sid']} {r['pnl']} ({r['detalii']})")
+                    return "Jurnal (ultimele evenimente):\n" + "\n".join(out[-40:])
                 if cmd == "/setari":
                     return s.describe()
                 if cmd == "/set" and len(args) == 2:

@@ -145,6 +145,9 @@ def main() -> int:
                 with open(mode_file, "w", encoding="utf-8") as fh:
                     fh.write(act["mode"])
         tr.listeners.append(remember_mode)
+        from us30bot.journal import CsvJournal
+        br.journal = CsvJournal(os.path.join(a.state, "jurnal.csv"), tr)
+        tr.listeners.append(br.journal.on_action)
         tg = load_config(a.state)
         if tg:
             TelegramBot(tg["token"], tg["chat_id"], br, notify_all_signals=not a.tg_only_actionable).start()

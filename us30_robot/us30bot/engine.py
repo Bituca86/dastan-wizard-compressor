@@ -220,6 +220,8 @@ class Engine:
             json.dump({"stop_widen": self.stop_widen}, fh, indent=1)
         with open(os.path.join(folder, "journal.json"), "w", encoding="utf-8") as fh:
             json.dump(self.journal, fh, indent=1, ensure_ascii=False)
+        with open(os.path.join(folder, "seq.txt"), "w", encoding="utf-8") as fh:
+            fh.write(str(self._seq))
 
     @classmethod
     def load(cls, folder: str, config: Optional[EngineConfig] = None) -> "Engine":
@@ -231,4 +233,19 @@ class Engine:
         if os.path.exists(ap):
             with open(ap, encoding="utf-8") as fh:
                 eng.stop_widen = json.load(fh).get("stop_widen", {})
+        jp = os.path.join(folder, "journal.json")
+        if os.path.exists(jp):  # keep the signal history (and unique signal ids) across restarts
+            try:
+                with open(jp, encoding="utf-8") as fh:
+                    eng.journal = [r for r in json.load(fh) if isinstance(r, dict)][-5000:]
+                eng._seq = max([int(r.get("id", 0)) for r in eng.journal] + [0])
+            except (ValueError, OSError):
+                eng.journal = []
+        sp = os.path.join(folder, "seq.txt")
+        if os.path.exists(sp):
+            try:
+                with open(sp, encoding="utf-8") as fh:
+                    eng._seq = max(eng._seq, int(fh.read().strip() or 0))
+            except (ValueError, OSError):
+                pass
         return eng
