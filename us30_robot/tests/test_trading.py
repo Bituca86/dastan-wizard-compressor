@@ -220,3 +220,24 @@ class TestJournal(unittest.TestCase):
         with open(os.path.join(d, "jurnal.csv"), encoding="utf-8-sig") as fh:
             self.assertEqual(len(list(csv.DictReader(fh, delimiter=";"))), len(rows) + 1)
         self.assertEqual(j2.tail(1)[0]["eveniment"], "OPRIRE")
+
+
+class TestDetectionLog(unittest.TestCase):
+    def test_every_detection_is_logged_with_features(self):
+        import csv, tempfile
+        from us30bot.datalog import DetectionLog, HEAD
+        from us30bot.features import RICH_NAMES
+        d = tempfile.mkdtemp()
+        eng = Engine(EngineConfig())
+        log = DetectionLog(os.path.join(d, "detectii.csv"))
+        eng.on_detection.append(log.on_detection)
+        for b in synthetic_bars(3000, seed=8):
+            eng.on_bar(b)
+        with open(os.path.join(d, "detectii.csv"), encoding="utf-8") as fh:
+            rows = list(csv.reader(fh))
+        self.assertEqual(rows[0], HEAD)
+        self.assertEqual(len(rows) - 1, eng.learner.updates)
+        self.assertTrue(all(len(r) == len(HEAD) for r in rows))
+        k = HEAD.index("pid")
+        self.assertTrue(all(1 <= float(r[k]) <= 91 for r in rows[1:]))
+        self.assertEqual(len(RICH_NAMES), len(set(RICH_NAMES)))

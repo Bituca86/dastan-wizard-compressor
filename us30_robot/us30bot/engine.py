@@ -11,6 +11,7 @@ from typing import Callable, Dict, List, Optional
 from .context import MarketState, SessionClock, SpreadModel
 from .evaluator import Evaluator, Tracked
 from .learner import Learner
+from .features import rich_features
 from .matrix import cell_key, cluster, context_of, explain, family_key, features
 from .models import BUY, Bar, Detection, Outcome, Signal
 from .patterns import detect_all
@@ -75,6 +76,7 @@ class Engine:
         self.on_signal: List[Callable[[Signal], None]] = []
         self.on_outcome: List[Callable[[Signal, Outcome], None]] = []
         self._atr_hist: List[float] = []
+        self.on_detection: List[Callable] = []   # called with (tracked, outcome) for every closed detection
         self.shadow_count = 0
 
     # ------------------------------------------------------------------ main loop
@@ -108,12 +110,18 @@ class Engine:
                 p, n = self.learner.score(cell, fam, x, explore=self.cfg.explore)
                 cost = self.spread_now() / d.risk
                 exp_r = p * d.rr - (1 - p) - cost
+                # rich context, recorded with the outcome of every detection (dataset for future re-training)
+                a_, b_, n_ = self.learner.cell_posterior(cell, fam)
+                n_opp = sum(len(v) for k, v in groups.items() if k != direction)
+                xr = rich_features(st, self.htf, d, ctx, len(ds), n_opp, base, cost, a_ / (a_ + b_), n_,
+                                   self.learner.logit_p(x))
                 scored.append((exp_r, p, n, d, ctx, cell, fam, x))
                 # every detection becomes a shadow trade -> learning sample
                 self.shadow_count += 1
                 self.ev.track(Tracked(-self.shadow_count, d.direction, d.entry, d.stop, d.target, st.i,
                                       {"cell": cell, "fam": fam, "x": x, "shadow": True,
-                                       "cost_r": cost}))
+                                       "cost_r": cost, "xr": xr, "p": p, "exp": exp_r,
+                                       "t": bar.time}))
         return self._decide(scored, groups)
 
     # ------------------------------------------------------------------ helpers
@@ -178,6 +186,8 @@ class Engine:
 
     def _on_close(self, t: Tracked, out: Outcome) -> None:
         if t.payload.get("shadow"):
+            for cb in self.on_detection:
+                cb(t, out)
             win = out.result == "WIN"
             alt = {rr: bool(v) for rr, v in t.alt.items()}
             self.learner.update(t.payload["cell"], t.payload["fam"], t.payload["x"], win, out.r_multiple, alt)

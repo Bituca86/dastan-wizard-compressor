@@ -151,6 +151,27 @@ Toate detecțiile brute, nefiltrate, au în medie −0,07R după spread. Pattern
 avantajul vine din filtrarea matricei (context + istoricul fiecărei celule). 5 luni înseamnă un eșantion mic:
 **rezultatele trecute nu garantează nimic**, testează pe demo înainte de bani reali.
 
+## Revizie cu metode avansate (noiembrie 2026) – ce s-a testat și ce a ieșit
+
+Toate cele 73.196 de detecții din iun–nov 2026 au fost transformate într-un set de date (42 de caracteristici
+de context + rezultatul real), iar modelele au fost validate walk-forward: antrenate doar pe trecut, testate pe
+luna următoare (aug, sep, oct, nov), cu o singură poziție deschisă, ca în robot.
+
+| Variantă | Tranzacții | Total | Medie | PF | Drawdown |
+|---|---|---|---|---|---|
+| **Regula actuală (matrice + praguri)** | 297 | **+52,1R** | +0,176R | 1,34 | 11,7R |
+| Gradient boosting pe profitul așteptat | 379 | +18,9R | +0,050R | 1,10 | 18,0R |
+| Gradient boosting pe probabilitate, expectanță ≥ 0,1 / 0,2 / 0,3 | 372 / 70 / 13 | −24 / −18 / −7R | negativ | <1 | – |
+| Regula actuală + veto al modelului | 61 | +13,9R | +0,228R | 1,56 | 2,8R |
+
+Modelul ordonează puțin mai bine detecțiile (AUC 0,56–0,60 față de 0,54–0,58), dar asta nu se transformă în
+profit pe date nevăzute; ca decident e mai slab decât regula simplă. Varianta „veto” are calitate ceva mai bună
+pe 61 de tranzacții – prea puține pentru o concluzie. Ținta fixă (1R / 1,5R / 2R / 3R) față de ținta actuală:
+diferențe de ±0,03R, în zgomot. **De aceea robotul tranzacționează în continuare cu regula actuală.**
+
+Ce a rămas în cod: fiecare detecție închisă se scrie în `state/detectii.csv` cu toate caracteristicile și
+rezultatul ei, ca testul să poată fi refăcut pe un eșantion de câteva ori mai mare.
+
 ## Teste
 
 ```bash

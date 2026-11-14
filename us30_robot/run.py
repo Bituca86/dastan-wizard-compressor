@@ -148,6 +148,8 @@ def main() -> int:
         from us30bot.journal import CsvJournal
         br.journal = CsvJournal(os.path.join(a.state, "jurnal.csv"), tr)
         tr.listeners.append(br.journal.on_action)
+        from us30bot.datalog import DetectionLog
+        tr.eng.on_detection.append(DetectionLog(os.path.join(a.state, "detectii.csv"), tr).on_detection)
         tg = load_config(a.state)
         if tg:
             TelegramBot(tg["token"], tg["chat_id"], br, notify_all_signals=not a.tg_only_actionable).start()
