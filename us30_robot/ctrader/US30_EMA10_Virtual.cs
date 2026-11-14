@@ -3,11 +3,12 @@
 // -----------------------------------------------------------------------------------------------------
 //  v1.7: TIMEFRAME SECUNDAR (implicit m2) + SEMNAL FINAL de convergenta + panou restructurat.
 //        - pe panou apar cele 3 EMA (2 / 5 / 10) calculate pe timeframe-ul secundar, indiferent de grafic:
-//            EMA2 peste EMA5 si peste EMA10  = SELL (▼ rosu)        [sens „Revenire”, implicit]
+//            EMA2 peste EMA5 si peste EMA10  = SELL (▼ rosu)        [sens „Revenire”]
 //            EMA2 coboara sub EMA5           = stop SELL (schimbare trend, ▶ gri)
 //            EMA2 si sub EMA10               = BUY (▲ verde)
 //            EMA2 urca peste EMA5            = stop BUY (schimbare trend, ▶ gri)   … si tot asa.
-//          Sensul se poate inversa din parametri („Trend”: EMA2 sus = BUY).
+//          v1.7.1: sensul implicit este „Trend” (EMA2 peste EMA5 si EMA10 = BUY, cum se citeste graficul);
+//          „Revenire” (EMA2 sus = SELL) ramane selectabil. Durata starii se calculeaza din numarul de bare.
 //        - SEMNAL FINAL = starea m2 + contextul graficului (distanta pretului fata de EMA10, blocari).
 //          Test pe US30 M1 ICMarkets, iun–nov 2026 (m2 + m5 reconstruite, ~7700 semnale m2, 07–21 UTC):
 //            · semnalul m2 SINGUR nu are avantaj masurabil (miscarea medie dupa semnal < 1 punct, sub spread);
@@ -115,7 +116,7 @@ namespace cAlgo.Indicators
         [Parameter("EMA medie", DefaultValue = 5, MinValue = 2, Group = "Timeframe secundar (m2)")] public int FastP2 { get; set; }
         [Parameter("EMA lenta", DefaultValue = 10, MinValue = 3, Group = "Timeframe secundar (m2)")] public int FastP3 { get; set; }
         [Parameter("Prag anti-palpaire intre EMA-uri (puncte)", DefaultValue = 0.3, MinValue = 0, Step = 0.1, Group = "Timeframe secundar (m2)")] public double FastGap { get; set; }
-        [Parameter("Sens semnal (Revenire: EMA rapida sus = SELL)", DefaultValue = VeSens.Revenire, Group = "Timeframe secundar (m2)")] public VeSens FastSense { get; set; }
+        [Parameter("Sens semnal (Trend: EMA rapida sus = BUY · Revenire: sus = SELL)", DefaultValue = VeSens.Trend, Group = "Timeframe secundar (m2)")] public VeSens FastSense { get; set; }
         [Parameter("CONFIRMAT de la distanta (x ATR grafic)", DefaultValue = 1.0, MinValue = 0, Step = 0.1, Group = "Semnal final (convergenta)")] public double ConvMinAtr { get; set; }
         [Parameter("CONFIRMAT pana la distanta (x ATR grafic)", DefaultValue = 1.5, MinValue = 0.1, Step = 0.1, Group = "Semnal final (convergenta)")] public double ConvMaxAtr { get; set; }
 
@@ -518,6 +519,17 @@ namespace cAlgo.Indicators
             }
         }
 
+        private double FastSpanMin()
+        {
+            long best = long.MaxValue;
+            for (int j = _fb.Count - 1; j > Math.Max(0, _fb.Count - 25); j--)
+            {
+                long d = (_fb.OpenTimes[j] - _fb.OpenTimes[j - 1]).Ticks;
+                if (d > 0 && d < best) best = d;
+            }
+            return best == long.MaxValue ? 1 : TimeSpan.FromTicks(best).TotalMinutes;
+        }
+
         // directia semnalului pentru o stare: +1 BUY, -1 SELL, 0 = stop / nedefinit
         private int FastDir(int code) => Math.Abs(code) != 1 ? 0 : FastSense == VeSens.Revenire ? -code : code;
         // directia care tocmai s-a oprit (pentru „stop SELL” / „stop BUY”)
@@ -838,8 +850,8 @@ namespace cAlgo.Indicators
             else
             {
                 int bars = _fn - _fStateBar;                               // bare inchise in aceasta stare
-                double min = (Server.Time - _fb.OpenTimes[_fStateBar]).TotalMinutes;
-                age = $"de {bars} {(bars == 1 ? "bara" : "bare")} (~{Math.Max(0, min):0} min)";
+                double min = bars * FastSpanMin();                         // din numarul de bare (corect si cu piata inchisa)
+                age = $"de {bars} {(bars == 1 ? "bara" : "bare")} (~{min:0} min)";
             }
             _tFast.Text = $"{name}  ·  {age}";
             _tFastSub.Text = $"EMA{FastP1} {F(l1)}  ·  EMA{FastP2} {F(l2)} ({S1(l1 - l2)})  ·  EMA{FastP3} {F(l3)} ({S1(l1 - l3)})";
