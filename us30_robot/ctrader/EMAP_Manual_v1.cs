@@ -1,9 +1,9 @@
 // =====================================================================================
-//  EMAP_Manual_v1 (v1.4: TRAILING cu PAS + PROFILURI LOCK)  —  derivat din EMA_Proiectie_Bot v8.8
+//  EMAP_Manual_v1 (v1.5: LOCK1–LOCK5 + TRAILING cu PAS + PROFILURI; revizie generala)  —  derivat din EMA_Proiectie_Bot v8.8
 //  Gestioneaza DOAR pozitiile manuale (fara label) de pe simbolul graficului:
 //    • SL virtual: SL-ul tau daca il pui, altfel distanta fixa
 //    • TP virtual optional (automat / pus de tine / din panou), cu LOCK-uri on/off la TP
-//    • LOCK1 / LOCK2 / LOCK3 — in puncte SAU in % din TP (selectabil)
+//    • LOCK1 … LOCK5 — in puncte SAU in % din TP (selectabil), fiecare cu on/off
 //    • TRAILING dupa ultimul LOCK: la fiecare PAS de profit in plus, SL urca cu PAS
 //      (distanta pret-SL ramane cea de la ultimul LOCK); SL doar se strange
 //    • PROFIL LOCK: Personalizat (parametrii tai) / Rapid / Echilibrat / Trend
@@ -12,6 +12,16 @@
 //  Paralel: nu atinge pozitiile cu label (alti roboti), obiecte grafice cu prefix unic,
 //  rezervare pozitie intre instante (LocalStorage Device) — doua copii nu se bat pe aceeasi pozitie.
 //  Distante in unitati de pret (US30: 1 punct = 1.0).
+//
+//  v1.5 – revizie:
+//    • LOCK4 si LOCK5 inainte de trailing (valorile implicite continua seria 6/3, 9/6, 12/9 → 15/12, 18/15)
+//    • repornire dupa o oprire brusca: SL-ul de catastrofa de pe server nu mai e luat drept „SL pus de tine”
+//      (inainte putea largi SL-ul virtual cu distanta de catastrofa); la repornire SL-ul virtual doar se strange
+//    • odata declansata, o inchidere se reincearca pana reuseste, chiar daca pretul revine (un stop ramane stop);
+//      inainte robotul putea ramane blocat in „inchidere in curs” fara sa mai gestioneze pozitia
+//    • PILOT: daca serverul respinge mutarea SL-ului si pretul trece de SL-ul virtual, pozitia se inchide la piata
+//    • pozitia noua e preluata imediat la deschidere (nu la urmatorul ciclu); pasul de TRAILING se salveaza
+//    • la pornire se verifica ordinea LOCK-urilor si se scrie un avertisment in Log daca e incoerenta
 // =====================================================================================
 using System;
 using System.Collections.Generic;
@@ -104,6 +114,12 @@ namespace cAlgo.Robots
         [Parameter("LOCK3 activ", Group = "LOCK in puncte", DefaultValue = true)] public bool L3On { get; set; }
         [Parameter("LOCK3 activare la profit (pct)", Group = "LOCK in puncte", DefaultValue = 12.0, MinValue = 0.1)] public double L3Trig { get; set; }
         [Parameter("LOCK3 SL peste intrare (pct)", Group = "LOCK in puncte", DefaultValue = 9.0, MinValue = -1000)] public double L3Sl { get; set; }
+        [Parameter("LOCK4 activ", Group = "LOCK in puncte", DefaultValue = true)] public bool L4On { get; set; }
+        [Parameter("LOCK4 activare la profit (pct)", Group = "LOCK in puncte", DefaultValue = 15.0, MinValue = 0.1)] public double L4Trig { get; set; }
+        [Parameter("LOCK4 SL peste intrare (pct)", Group = "LOCK in puncte", DefaultValue = 12.0, MinValue = -1000)] public double L4Sl { get; set; }
+        [Parameter("LOCK5 activ", Group = "LOCK in puncte", DefaultValue = true)] public bool L5On { get; set; }
+        [Parameter("LOCK5 activare la profit (pct)", Group = "LOCK in puncte", DefaultValue = 18.0, MinValue = 0.1)] public double L5Trig { get; set; }
+        [Parameter("LOCK5 SL peste intrare (pct)", Group = "LOCK in puncte", DefaultValue = 15.0, MinValue = -1000)] public double L5Sl { get; set; }
 
         [Parameter("LOCK1 activare (% din TP)", Group = "LOCK in % din TP", DefaultValue = 50.0, MinValue = 1, MaxValue = 99)] public double L1TrigP { get; set; }
         [Parameter("LOCK1 SL (% din TP)", Group = "LOCK in % din TP", DefaultValue = 30.0, MinValue = -100, MaxValue = 99)] public double L1SlP { get; set; }
@@ -111,6 +127,10 @@ namespace cAlgo.Robots
         [Parameter("LOCK2 SL (% din TP)", Group = "LOCK in % din TP", DefaultValue = 50.0, MinValue = -100, MaxValue = 99)] public double L2SlP { get; set; }
         [Parameter("LOCK3 activare (% din TP)", Group = "LOCK in % din TP", DefaultValue = 85.0, MinValue = 1, MaxValue = 99)] public double L3TrigP { get; set; }
         [Parameter("LOCK3 SL (% din TP)", Group = "LOCK in % din TP", DefaultValue = 70.0, MinValue = -100, MaxValue = 99)] public double L3SlP { get; set; }
+        [Parameter("LOCK4 activare (% din TP)", Group = "LOCK in % din TP", DefaultValue = 90.0, MinValue = 1, MaxValue = 99)] public double L4TrigP { get; set; }
+        [Parameter("LOCK4 SL (% din TP)", Group = "LOCK in % din TP", DefaultValue = 78.0, MinValue = -100, MaxValue = 99)] public double L4SlP { get; set; }
+        [Parameter("LOCK5 activare (% din TP)", Group = "LOCK in % din TP", DefaultValue = 95.0, MinValue = 1, MaxValue = 99)] public double L5TrigP { get; set; }
+        [Parameter("LOCK5 SL (% din TP)", Group = "LOCK in % din TP", DefaultValue = 85.0, MinValue = -100, MaxValue = 99)] public double L5SlP { get; set; }
 
         // ------------------------------- TRAILING dupa ultimul LOCK ------------------
         [Parameter("TRAILING dupa ultimul LOCK", Group = "TRAILING (PAS)", DefaultValue = true)] public bool TrailOn { get; set; }
@@ -131,11 +151,12 @@ namespace cAlgo.Robots
             public double VSl; public double? VTp; public int Lvl; public bool LocksOn = true; public int TrailK;
             public double? ExpSl, ExpTp;            // ce stim ca e pe server (detectie modificari tale)
             public bool Pending; public DateTime PendSince, FailUntil;
-            public bool Closing; public DateTime CloseTry; public int CloseTries; public string CloseWhy = "";
+            public bool Closing, CloseBusy; public DateTime CloseTry; public int CloseTries; public string CloseWhy = "";
             public bool Dirty = true;
         }
 
         private const LocalStorageScope Scope = LocalStorageScope.Device;
+        private const int NL = 5;                     // numarul de LOCK-uri
         private readonly Dictionary<long, St> _st = new Dictionary<long, St>();
         private HashSet<string> _labels;
         private string _inst, _pfx;
@@ -155,10 +176,11 @@ namespace cAlgo.Robots
             _tol = Symbol.TickSize * 0.5;
             _useStore = !IsBacktesting;
             ApplyProfile();
+            ValidateConfig();
             _labels = new HashSet<string>((ExtraLabels ?? "").Split(new[] { ',', ';' }, StringSplitOptions.RemoveEmptyEntries)
                                           .Select(s => s.Trim()).Where(s => s.Length > 0));
 
-            Positions.Opened += e => { if (IsCandidate(e.Position)) _lastClaim = DateTime.MinValue; };
+            Positions.Opened += e => { if (IsCandidate(e.Position)) { ClaimCycle(); _lastClaim = DateTime.UtcNow; } };   // preluare imediata
             Positions.Closed += OnClosed;
             Positions.Modified += e => { if (_st.TryGetValue(e.Position.Id, out var s)) DetectUser(s); };
             Chart.ObjectsUpdated += OnObjUpdated;
@@ -195,8 +217,14 @@ namespace cAlgo.Robots
                 var p = s.Pos; if (p == null) continue;
                 if (PilotOnStop && !_pilot)
                 {
-                    try { ModifyPosition(p, R(s.VSl), s.VTp.HasValue ? R(s.VTp.Value) : (double?)null, ProtectionType.Absolute); s.ExpSl = R(s.VSl); s.ExpTp = s.VTp; }
-                    catch { }
+                    try
+                    {
+                        var r = ModifyPosition(p, R(s.VSl), s.VTp.HasValue ? R(s.VTp.Value) : (double?)null, ProtectionType.Absolute);
+                        if (r.IsSuccessful) { s.ExpSl = R(s.VSl); s.ExpTp = s.VTp; }
+                        else Print("EMAP-M: #" + s.Id + " PILOT la oprire ESUAT (" + r.Error + ") – pe server ramane SL "
+                                   + (p.StopLoss.HasValue ? F(p.StopLoss.Value) : "—") + ". Verifica pozitia!");
+                    }
+                    catch (Exception ex) { Print("EMAP-M: #" + s.Id + " PILOT la oprire – eroare: " + ex.Message); }
                 }
                 Save(s);
                 StoreRemove("EMM_OWN_" + s.Id);
@@ -212,21 +240,41 @@ namespace cAlgo.Robots
         {
             if (Profil == EmmProfil.Personalizat) return;
             LockMode = EmmLock.Puncte;
-            L1On = L2On = L3On = true;
+            L1On = L2On = L3On = L4On = L5On = true;
             TrailOn = true;
             switch (Profil)
             {
-                case EmmProfil.Rapid:      SetLocks(6, 3, 9, 6, 12, 9, 3); break;      // iesiri rapide; PAS = pasul dintre lock-uri
-                case EmmProfil.Echilibrat: SetLocks(10, 2, 15, 6, 20, 11, 3); break;
-                case EmmProfil.Trend:      SetLocks(15, 2, 25, 12, 35, 25, 3); break;  // tine trendul, cedeaza mai mult
+                // activare / SL pentru LOCK1..LOCK5, apoi PAS-ul de trailing
+                case EmmProfil.Rapid:      SetLocks(3, 6, 3, 9, 6, 12, 9, 15, 12, 18, 15); break;      // iesiri rapide, SL la 3 pct in spate
+                case EmmProfil.Echilibrat: SetLocks(3, 10, 2, 15, 6, 20, 11, 25, 16, 30, 21); break;   // SL la ~9 pct in spate
+                case EmmProfil.Trend:      SetLocks(3, 15, 2, 25, 12, 35, 25, 45, 35, 55, 45); break;  // tine trendul, SL la 10 pct in spate
             }
-            Event("Profil " + Profil + ": LOCK " + L1Trig + "/" + L1Sl + " · " + L2Trig + "/" + L2Sl + " · "
-                  + L3Trig + "/" + L3Sl + " · PAS " + TrailStep);
+            string txt = "";
+            for (int i = 1; i <= NL; i++) txt += (i > 1 ? " · " : "") + LTrig(i).ToString("0.#", IC) + "/" + LOff(i).ToString("0.#", IC);
+            Event("Profil " + Profil + ": LOCK " + txt + " · PAS " + TrailStep.ToString("0.#", IC));
         }
 
-        private void SetLocks(double t1, double s1, double t2, double s2, double t3, double s3, double step)
+        private void SetLocks(double step, double t1, double s1, double t2, double s2, double t3, double s3,
+                              double t4, double s4, double t5, double s5)
         {
-            L1Trig = t1; L1Sl = s1; L2Trig = t2; L2Sl = s2; L3Trig = t3; L3Sl = s3; TrailStep = step;
+            L1Trig = t1; L1Sl = s1; L2Trig = t2; L2Sl = s2; L3Trig = t3; L3Sl = s3;
+            L4Trig = t4; L4Sl = s4; L5Trig = t5; L5Sl = s5; TrailStep = step;
+        }
+
+        // avertismente la pornire daca LOCK-urile nu sunt in ordine crescatoare
+        private void ValidateConfig()
+        {
+            bool pts = LockMode == EmmLock.Puncte;
+            double pt = double.NegativeInfinity, po = double.NegativeInfinity;
+            for (int i = 1; i <= NL; i++)
+            {
+                if (!LOn(i)) continue;
+                double t = pts ? LTrig(i) : LTrigP(i), o = pts ? LOff(i) : LOffP(i);
+                if (o >= t) Event($"ATENTIE: LOCK{i} are SL ({o.ToString("0.#", IC)}) >= activarea ({t.ToString("0.#", IC)}) – se aplica abia cand pretul trece de SL + spatiul minim");
+                if (t <= pt) Event($"ATENTIE: LOCK{i} se activeaza la {t.ToString("0.#", IC)}, nu peste LOCK-ul anterior ({pt.ToString("0.#", IC)})");
+                if (o < po) Event($"ATENTIE: LOCK{i} are SL sub cel al LOCK-ului anterior – nu va avea efect (SL doar se strange)");
+                pt = t; po = o;
+            }
         }
 
         // =============================== Selectie & rezervare ===============================
@@ -278,17 +326,34 @@ namespace cAlgo.Robots
         private void Adopt(Position p)
         {
             bool buy = p.TradeType == TradeType.Buy;
-            var s = Load(p) ?? new St
+            var s = Load(p);
+            bool restored = s != null;
+            if (!restored)
             {
-                VSl = UseUserSl && p.StopLoss.HasValue ? p.StopLoss.Value
-                      : R(buy ? p.EntryPrice - SlFixPts : p.EntryPrice + SlFixPts),
-                VTp = UseUserTp && p.TakeProfit.HasValue ? p.TakeProfit
-                      : TpOn ? R(buy ? p.EntryPrice + TpPts : p.EntryPrice - TpPts) : (double?)null,
-                ExpSl = p.StopLoss, ExpTp = p.TakeProfit
-            };
+                s = new St
+                {
+                    VSl = UseUserSl && p.StopLoss.HasValue ? p.StopLoss.Value
+                          : R(buy ? p.EntryPrice - SlFixPts : p.EntryPrice + SlFixPts),
+                    VTp = UseUserTp && p.TakeProfit.HasValue ? p.TakeProfit
+                          : TpOn ? R(buy ? p.EntryPrice + TpPts : p.EntryPrice - TpPts) : (double?)null
+                };
+            }
+            else
+            {
+                // Stare restaurata dupa repornire. SL-ul de pe server poate fi cel de catastrofa (mai larg) sau unul
+                // pus de tine cat robotul era oprit: il preluam DOAR daca e mai protector – SL-ul virtual nu se largeste.
+                if (UseUserSl && p.StopLoss.HasValue)
+                {
+                    double sv = R(p.StopLoss.Value);
+                    if (buy ? sv > s.VSl + _tol : sv < s.VSl - _tol) s.VSl = sv;
+                }
+                if (UseUserTp && p.TakeProfit.HasValue) s.VTp = R(p.TakeProfit.Value);
+            }
+            s.ExpSl = p.StopLoss; s.ExpTp = p.TakeProfit;
             s.Id = p.Id; s.Pos = p; s.Buy = buy; s.Dirty = true;
             _st[p.Id] = s;
-            Event("#" + p.Id + " preluata · SL v " + F(s.VSl) + (s.VTp.HasValue ? " · TP v " + F(s.VTp.Value) : ""));
+            Event("#" + p.Id + (restored ? " reluata" : " preluata") + " · SL v " + F(s.VSl) + (s.VTp.HasValue ? " · TP v " + F(s.VTp.Value) : "")
+                  + (restored && s.Lvl > 0 ? " · LOCK" + s.Lvl : ""));
         }
 
         private void DropLocal(long id)
@@ -316,27 +381,29 @@ namespace cAlgo.Robots
         {
             var p = s.Pos; if (p == null) return;
             double px = s.Buy ? Symbol.Bid : Symbol.Ask;
+            if (s.Closing) { RetryClose(s); return; }                          // inchidere declansata: doar reincercam
             ApplyLocks(s, px);
-            if (!_pilot) CheckExit(s, px);
+            CheckExit(s, px);
         }
+
+        private bool LOn(int i) => i == 1 ? L1On : i == 2 ? L2On : i == 3 ? L3On : i == 4 ? L4On : L5On;
+        private double LTrig(int i) => i == 1 ? L1Trig : i == 2 ? L2Trig : i == 3 ? L3Trig : i == 4 ? L4Trig : L5Trig;
+        private double LOff(int i) => i == 1 ? L1Sl : i == 2 ? L2Sl : i == 3 ? L3Sl : i == 4 ? L4Sl : L5Sl;
+        private double LTrigP(int i) => i == 1 ? L1TrigP : i == 2 ? L2TrigP : i == 3 ? L3TrigP : i == 4 ? L4TrigP : L5TrigP;
+        private double LOffP(int i) => i == 1 ? L1SlP : i == 2 ? L2SlP : i == 3 ? L3SlP : i == 4 ? L4SlP : L5SlP;
 
         private bool LocksActive(St s) => s.LocksOn && (!s.VTp.HasValue || TpLocks);
 
         private bool LockDef(int i, St s, out double trig, out double off)
         {
             trig = off = 0;
-            bool on = i == 1 ? L1On : i == 2 ? L2On : L3On;
-            if (!on) return false;
-            if (LockMode == EmmLock.Puncte)
-            {
-                trig = i == 1 ? L1Trig : i == 2 ? L2Trig : L3Trig;
-                off = i == 1 ? L1Sl : i == 2 ? L2Sl : L3Sl;
-            }
+            if (i < 1 || i > NL || !LOn(i)) return false;
+            if (LockMode == EmmLock.Puncte) { trig = LTrig(i); off = LOff(i); }
             else
             {
                 double refd = s.VTp.HasValue ? Math.Abs(s.VTp.Value - s.Pos.EntryPrice) : RefTpPts;
-                trig = refd * (i == 1 ? L1TrigP : i == 2 ? L2TrigP : L3TrigP) / 100.0;
-                off = refd * (i == 1 ? L1SlP : i == 2 ? L2SlP : L3SlP) / 100.0;
+                trig = refd * LTrigP(i) / 100.0;
+                off = refd * LOffP(i) / 100.0;
             }
             return true;
         }
@@ -345,7 +412,7 @@ namespace cAlgo.Robots
         {
             if (!LocksActive(s)) return;
             double e = s.Pos.EntryPrice, prof = s.Buy ? px - e : e - px;
-            for (int i = s.Lvl + 1; i <= 3; i++)
+            for (int i = s.Lvl + 1; i <= NL; i++)
             {
                 if (!LockDef(i, s, out double trig, out double off)) continue;
                 if (prof < trig) break;
@@ -359,10 +426,10 @@ namespace cAlgo.Robots
             ApplyTrail(s, px, e, prof);
         }
 
-        // ultimul LOCK activat din parametri (1..3), 0 daca niciunul
+        // ultimul LOCK activat din parametri (1..NL), 0 daca niciunul
         private int LastLock(St s)
         {
-            for (int i = 3; i >= 1; i--) if (LockDef(i, s, out _, out _)) return i;
+            for (int i = NL; i >= 1; i--) if (LockDef(i, s, out _, out _)) return i;
             return 0;
         }
 
@@ -390,7 +457,7 @@ namespace cAlgo.Robots
                 s.VSl = ns; s.Dirty = true;
                 if (k > s.TrailK) Event("#" + s.Id + " TRAIL pas " + k + " · SL v " + F(s.VSl));
             }
-            if (k > s.TrailK) s.TrailK = k;
+            if (k > s.TrailK) { s.TrailK = k; s.Dirty = true; }
         }
 
         // urmatorul pas de trailing (pentru panou)
@@ -409,20 +476,37 @@ namespace cAlgo.Robots
 
         private void CheckExit(St s, double px)
         {
-            if (s.Closing && (DateTime.UtcNow - s.CloseTry).TotalMilliseconds < (s.CloseTries < 5 ? RetryMs : 2000)) return;
             bool sl = s.Buy ? px <= s.VSl : px >= s.VSl;
             bool tp = s.VTp.HasValue && (s.Buy ? px >= s.VTp.Value : px <= s.VTp.Value);
-            if (sl) DoClose(s, s.Lvl > 0 ? "LOCK" + s.Lvl : "SL v");
+            if (_pilot)
+            {
+                // PILOT: nivelurile le executa serverul. Plasa de siguranta: daca SL-ul de pe server NU e (inca) cel
+                // virtual (modificare respinsa / in curs) si pretul a trecut de SL-ul virtual, inchidem la piata.
+                if (sl && !Eq(s.Pos.StopLoss, R(s.VSl))) DoClose(s, "SL v (PILOT: server neactualizat)");
+                return;
+            }
+            if (sl) DoClose(s, s.TrailK > 0 ? "TRAIL " + s.TrailK : s.Lvl > 0 ? "LOCK" + s.Lvl : "SL v");
             else if (tp) DoClose(s, "TP v");
+        }
+
+        // o inchidere declansata se reincearca pana reuseste (chiar daca pretul revine): un stop ramane stop
+        private void RetryClose(St s)
+        {
+            double ms = (DateTime.UtcNow - s.CloseTry).TotalMilliseconds;
+            if (s.CloseBusy && ms < 5000) return;                              // cererea anterioara e inca in curs
+            int wait = s.CloseTries < 5 ? RetryMs : s.CloseTries < 30 ? 2000 : 30000;
+            if (ms < wait) return;
+            DoClose(s, s.CloseWhy);
         }
 
         private void DoClose(St s, string why)
         {
             var p = s.Pos; if (p == null) return;
-            s.Closing = true; s.CloseTry = DateTime.UtcNow; s.CloseTries++; s.CloseWhy = why;
+            s.Closing = true; s.CloseBusy = true; s.CloseTry = DateTime.UtcNow; s.CloseTries++; s.CloseWhy = why;
             ClosePositionAsync(p, r =>
             {
-                if (!r.IsSuccessful) Event("#" + s.Id + " inchidere esuata (" + r.Error + ") · reincerc");
+                s.CloseBusy = false;
+                if (!r.IsSuccessful) Event("#" + s.Id + " inchidere esuata (" + r.Error + ") · reincerc (" + s.CloseTries + ")");
             });
         }
 
@@ -445,9 +529,13 @@ namespace cAlgo.Robots
                 else dSl = null;
             }
 
-            if (Eq(p.StopLoss, dSl) && Eq(p.TakeProfit, dTp)) { s.ExpSl = p.StopLoss; s.ExpTp = p.TakeProfit; return; }
+            if (Eq(p.StopLoss, dSl) && Eq(p.TakeProfit, dTp))
+            {
+                if (!Eq(s.ExpSl, p.StopLoss) || !Eq(s.ExpTp, p.TakeProfit)) s.Dirty = true;
+                s.ExpSl = p.StopLoss; s.ExpTp = p.TakeProfit; return;
+            }
 
-            s.Pending = true; s.PendSince = DateTime.UtcNow; s.ExpSl = dSl; s.ExpTp = dTp;
+            s.Pending = true; s.PendSince = DateTime.UtcNow; s.ExpSl = dSl; s.ExpTp = dTp; s.Dirty = true;
             ModifyPositionAsync(p, dSl, dTp, ProtectionType.Absolute, r =>
             {
                 s.Pending = false;
@@ -678,7 +766,7 @@ namespace cAlgo.Robots
                 sumNet += s.Pos.NetProfit;
             }
 
-            _hdr.Text = $"EMAP_Manual v1.4 | {Profil} | {(_pilot ? "✈ PILOT" : "VIRTUAL")} | LOCK: {(LockMode == EmmLock.Puncte ? "puncte" : "% din TP")}"
+            _hdr.Text = $"EMAP_Manual v1.5 | {Profil} | {(_pilot ? "✈ PILOT" : "VIRTUAL")} | LOCK: {(LockMode == EmmLock.Puncte ? "puncte" : "% din TP")}"
                         + (TrailOn ? $" | TRAIL pas {(LockMode == EmmLock.Puncte ? TrailStep.ToString("0.#", IC) + " pct" : TrailStepP.ToString("0.#", IC) + "% TP")}" : " | fara TRAIL")
                         + (TpOn ? $" | TP auto {TpPts:0.#}" : " | fara TP auto");
             if (list.Count == 0)
@@ -784,7 +872,7 @@ namespace cAlgo.Robots
         private bool NextLock(St s, out int idx, out double atPts, out double slPts)
         {
             idx = 0; atPts = slPts = 0;
-            for (int i = s.Lvl + 1; i <= 3; i++)
+            for (int i = s.Lvl + 1; i <= NL; i++)
                 if (LockDef(i, s, out atPts, out slPts)) { idx = i; return true; }
             return false;
         }
@@ -905,7 +993,8 @@ namespace cAlgo.Robots
                 s.VTp.HasValue ? s.VTp.Value.ToString("R", IC) : "",
                 s.Lvl.ToString(IC), s.LocksOn ? "1" : "0",
                 s.ExpSl.HasValue ? s.ExpSl.Value.ToString("R", IC) : "",
-                s.ExpTp.HasValue ? s.ExpTp.Value.ToString("R", IC) : "");
+                s.ExpTp.HasValue ? s.ExpTp.Value.ToString("R", IC) : "",
+                s.TrailK.ToString(IC));
             StoreSet("EMM_ST_" + s.Id, v);
             s.Dirty = false;
         }
@@ -923,7 +1012,8 @@ namespace cAlgo.Robots
             {
                 VSl = vsl, VTp = D(a[1]),
                 Lvl = int.TryParse(a[2], NumberStyles.Integer, IC, out int l) ? l : 0,
-                LocksOn = a[3] != "0", ExpSl = D(a[4]), ExpTp = D(a[5])
+                LocksOn = a[3] != "0", ExpSl = D(a[4]), ExpTp = D(a[5]),
+                TrailK = a.Length > 6 && int.TryParse(a[6], NumberStyles.Integer, IC, out int tk) ? tk : 0
             };
         }
 
