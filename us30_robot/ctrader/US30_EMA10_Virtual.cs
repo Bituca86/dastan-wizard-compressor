@@ -1,6 +1,23 @@
 // =====================================================================================================
-//  US30_EMA10_Virtual  v1.6  —  indicator cTrader (IC Markets), plecat de la US30_EMA_Lines v1.3
+//  US30_EMA10_Virtual  v1.7  —  indicator cTrader (IC Markets), plecat de la US30_EMA_Lines v1.3
 // -----------------------------------------------------------------------------------------------------
+//  v1.7: TIMEFRAME SECUNDAR (implicit m2) + SEMNAL FINAL de convergenta + panou restructurat.
+//        - pe panou apar cele 3 EMA (2 / 5 / 10) calculate pe timeframe-ul secundar, indiferent de grafic:
+//            EMA2 peste EMA5 si peste EMA10  = SELL (▼ rosu)        [sens „Revenire”, implicit]
+//            EMA2 coboara sub EMA5           = stop SELL (schimbare trend, ▶ gri)
+//            EMA2 si sub EMA10               = BUY (▲ verde)
+//            EMA2 urca peste EMA5            = stop BUY (schimbare trend, ▶ gri)   … si tot asa.
+//          Sensul se poate inversa din parametri („Trend”: EMA2 sus = BUY).
+//        - SEMNAL FINAL = starea m2 + contextul graficului (distanta pretului fata de EMA10, blocari).
+//          Test pe US30 M1 ICMarkets, iun–nov 2026 (m2 + m5 reconstruite, ~7700 semnale m2, 07–21 UTC):
+//            · semnalul m2 SINGUR nu are avantaj masurabil (miscarea medie dupa semnal < 1 punct, sub spread);
+//            · singura zona cu miscare favorabila in AMBELE jumatati ale perioadei: pretul la 1,0–1,5 ATR
+//              dincolo de EMA10 de pe m5 (+3…+6 pct in iun–aug, +0,7…+3,5 pct in sep–nov, la 4–20 min);
+//            · peste 1,5 ATR rezultatul e instabil (+11 / −7 pct) → fara intrare.
+//          De aceea „CONFIRMAT” cere zona 1,0–1,5 ATR (setabila). Avantajul e mic si pe un esantion redus
+//          (~300 de cazuri pe perioada) — foloseste-l ca filtru, nu ca garantie.
+//        - panoul are acum 3 zone: SEMNAL FINAL · timeframe secundar · grafic; detaliile modelului si
+//          statistica sunt sub butonul „Detalii”.
 //  1) Liniile EMA 1 / 2 / 3 (2 / 5 / 10 implicit), shift, tip medie, istoric, sageti la cross EMA1/EMA2
 //     cu pragul de validare al robotului FAST — ca in US30_EMA_Lines v1.3.
 //  2) EMA 10 VIRTUALA: proiectia EMA 10 de la lumanarea curenta, H lumanari in viitor (linie punctata).
@@ -61,6 +78,7 @@ namespace cAlgo.Indicators
     public enum VeColt { StangaSus, DreaptaSus, StangaJos, DreaptaJos }
     public enum VeOrizont { Auto, Bare3, Bare4, Bare5 }
     public enum VeLinie { EMA1, PretCurent }
+    public enum VeSens { Revenire, Trend }
 
     [Indicator(IsOverlay = true, AccessRights = AccessRights.None, TimeZone = TimeZones.UTC)]
     public class US30_EMA10_Virtual : Indicator
@@ -89,6 +107,17 @@ namespace cAlgo.Indicators
         [Parameter("Trend: lateral daca distanta intre EMA-uri < (x ATR)", DefaultValue = 0.1, MinValue = 0, Step = 0.05, Group = "Cross (ca robotul FAST)")] public double TrendMinAtr { get; set; }
         [Parameter("Sageata BUY", DefaultValue = "#FF26C978", Group = "Cross (ca robotul FAST)")] public Color CArrUp { get; set; }
         [Parameter("Sageata SELL", DefaultValue = "#FFEF5350", Group = "Cross (ca robotul FAST)")] public Color CArrDn { get; set; }
+
+        // ---------------- timeframe secundar + convergenta ----------------
+        [Parameter("Afiseaza timeframe-ul secundar", DefaultValue = true, Group = "Timeframe secundar (m2)")] public bool ShowFast { get; set; }
+        [Parameter("Timeframe secundar", DefaultValue = "Minute2", Group = "Timeframe secundar (m2)")] public TimeFrame FastTf { get; set; }
+        [Parameter("EMA rapida", DefaultValue = 2, MinValue = 1, Group = "Timeframe secundar (m2)")] public int FastP1 { get; set; }
+        [Parameter("EMA medie", DefaultValue = 5, MinValue = 2, Group = "Timeframe secundar (m2)")] public int FastP2 { get; set; }
+        [Parameter("EMA lenta", DefaultValue = 10, MinValue = 3, Group = "Timeframe secundar (m2)")] public int FastP3 { get; set; }
+        [Parameter("Prag anti-palpaire intre EMA-uri (puncte)", DefaultValue = 0.3, MinValue = 0, Step = 0.1, Group = "Timeframe secundar (m2)")] public double FastGap { get; set; }
+        [Parameter("Sens semnal (Revenire: EMA rapida sus = SELL)", DefaultValue = VeSens.Revenire, Group = "Timeframe secundar (m2)")] public VeSens FastSense { get; set; }
+        [Parameter("CONFIRMAT de la distanta (x ATR grafic)", DefaultValue = 1.0, MinValue = 0, Step = 0.1, Group = "Semnal final (convergenta)")] public double ConvMinAtr { get; set; }
+        [Parameter("CONFIRMAT pana la distanta (x ATR grafic)", DefaultValue = 1.5, MinValue = 0.1, Step = 0.1, Group = "Semnal final (convergenta)")] public double ConvMaxAtr { get; set; }
 
         // ---------------- EMA 10 virtuala ----------------
         [Parameter("Perioada EMA de referinta", DefaultValue = 10, MinValue = 2, Group = "EMA 10 virtuala")] public int RefPeriod { get; set; }
@@ -185,6 +214,12 @@ namespace cAlgo.Indicators
         private int _statAt = -1;
         private bool _printed;
 
+        // timeframe secundar (EMA-uri pe bare inchise + stare)
+        private Bars _fb;
+        private int _fn, _fr25, _fr210, _fCode, _fLastMain, _fStateBar = -1;
+        private double _g1, _g2, _g3, _fa1, _fa2, _fa3;
+        private TextBlock _tFinal, _tFinalSub, _tFastHdr, _tFast, _tFastSub, _tChartHdr;
+
         // panou
         private StackPanel _root, _body, _moveRow, _statBox;
         private Border _main;
@@ -213,6 +248,16 @@ namespace cAlgo.Indicators
             _al0 = 2.0 / (RefPeriod + 1); _al1 = 2.0 / (Period1 + 1); _al2 = 2.0 / (Period2 + 1);
             _warm = Math.Max(Math.Max(AtrLongPeriod + 5, 3 * RefPeriod), 30);
             _sf = new double[MaxSamples * NF]; _sd = new float[MaxSamples * HMAX]; _stc = new byte[MaxSamples];
+
+            if (ShowFast)
+            {
+                try
+                {
+                    _fb = MarketData.GetBars(FastTf);
+                    _fa1 = 2.0 / (FastP1 + 1); _fa2 = 2.0 / (FastP2 + 1); _fa3 = 2.0 / (FastP3 + 1);
+                }
+                catch (Exception ex) { Print("Timeframe secundar indisponibil: " + ex.Message); _fb = null; }
+            }
 
             LoadUI();
             BuildPanel();
@@ -446,6 +491,38 @@ namespace cAlgo.Indicators
 
         private int Fix(int h, out bool naive) { naive = _vCnt >= 200 && Skill(h) <= 0; return h; }
 
+        // =============================== timeframe secundar ===============================
+        private int Rel(double g, int prev) => g > FastGap ? 1 : g < -FastGap ? -1 : prev;
+
+        //  +1 = EMA rapida peste ambele · -1 = sub ambele · 2 = intre ele (stop: schimbare de trend) · 0 = nedefinit
+        private static int FastCode(int r25, int r210) =>
+            r25 > 0 && r210 > 0 ? 1 : r25 < 0 && r210 < 0 ? -1 : (r25 != 0 || r210 != 0) ? 2 : 0;
+
+        private void SyncFast()
+        {
+            if (_fb == null) return;
+            int lastClosed = _fb.Count - 2;
+            while (_fn <= lastClosed)
+            {
+                double c = _fb.ClosePrices[_fn];
+                if (_fn == 0) { _g1 = _g2 = _g3 = c; }
+                else { _g1 += _fa1 * (c - _g1); _g2 += _fa2 * (c - _g2); _g3 += _fa3 * (c - _g3); }
+                if (_fn >= 3 * FastP3)
+                {
+                    _fr25 = Rel(_g1 - _g2, _fr25); _fr210 = Rel(_g1 - _g3, _fr210);
+                    int code = FastCode(_fr25, _fr210);
+                    if (code != _fCode || _fStateBar < 0) { _fCode = code; _fStateBar = _fn; }
+                    if (Math.Abs(code) == 1) _fLastMain = code;
+                }
+                _fn++;
+            }
+        }
+
+        // directia semnalului pentru o stare: +1 BUY, -1 SELL, 0 = stop / nedefinit
+        private int FastDir(int code) => Math.Abs(code) != 1 ? 0 : FastSense == VeSens.Revenire ? -code : code;
+        // directia care tocmai s-a oprit (pentru „stop SELL” / „stop BUY”)
+        private int FastStopped(int code) => code != 2 ? 0 : FastDir(_fLastMain);
+
         // =============================== statistica istoric ===============================
         private void ComputeStats()
         {
@@ -642,6 +719,9 @@ namespace cAlgo.Indicators
             if (!_calPrinted && _brN[HR] >= 300) PrintCalibration();
 
             // ETICHETA DE SEMNAL – orizont 5 bare, rata istorica pe treapta de distanta
+            int cSide = Math.Sign(c - e);                                 // pentru semnalul final
+            int cKind = 0;                                                // 2 intrare · 1 asteapta · -1 blocare · 0 nedefinit
+            string cWhy = "";
             {
                 int side = Math.Sign(c - e);                              // +1 pret peste EMA → SELL spre EMA
                 string sd = side > 0 ? "SELL" : "BUY";
@@ -664,19 +744,23 @@ namespace cAlgo.Indicators
                 {
                     _tSig.Text = $"⛔ BLOCARE {sd} – {N2(dAtr)} ATR de EMA: revine in ≤5 bare doar {hs} (miscare de trend)";
                     _tSig.ForegroundColor = COrange;
+                    cKind = -1; cWhy = $"{N2(dAtr)} ATR de EMA{RefPeriod}: revine rar ({hs})";
                 }
                 else if (SigTrendBlock && against)
                 {
                     _tSig.Text = $"⛔ BLOCARE {sd} – schimbare de trend {(cdir > 0 ? "ASCENDENT" : "DESCENDENT")} contra (pretul se departeaza de EMA)";
                     _tSig.ForegroundColor = COrange;
+                    cKind = -1; cWhy = $"schimbare de trend {(cdir > 0 ? "ascendent" : "descendent")} pe {TfShort(TimeFrame)}";
                 }
                 else if (dAtr >= SigMinAtr && dAtr <= SigMaxAtr && h5 * 100 >= SigEnterPct)
                 {
                     _tSig.Text = $"{(side > 0 ? "▼ SELL" : "▲ BUY")} spre EMA{RefPeriod} – revine in ≤5 bare {hs} (istoric, n={_bN[bk]:0}){med} · {tpTxt}{trendNote}";
                     _tSig.ForegroundColor = side > 0 ? CRed : CGreen;
+                    cKind = 2;
                 }
                 else
                 {
+                    cKind = 1;
                     string why = dAtr < SigMinAtr ? $"prea aproape de EMA ({N2(dAtr)} ATR < {N1(SigMinAtr)}), TP prea mic"
                                : dAtr > SigMaxAtr ? $"{N2(dAtr)} ATR > {N1(SigMaxAtr)}: revine in ≤5 bare doar {hs}"
                                : $"revine in ≤5 bare {hs} (< {SigEnterPct:0}%)";
@@ -701,6 +785,8 @@ namespace cAlgo.Indicators
             }
             else _tWarn.IsVisible = false;
 
+            UpdateFast(c, e, atr, dAtr, cSide, cKind, cWhy);
+
             string sk = _vCnt >= 200 ? $"{Skill(H) * 100:+0;-0}% fata de naiv · eroare ~{N1(_errM[H] / Math.Max(1e-9, _vCnt))} pct" : "validare in curs";
             _tModel.Text = $"Model: {_sCount} mostre · H={H} {(Horizon == VeOrizont.Auto ? "auto" : "fix")} · {sk}"
                            + (naive ? " · NAIV (modelul nu bate pretul constant)" : "")
@@ -713,6 +799,119 @@ namespace cAlgo.Indicators
             }
 
             if (DrawProj) DrawProjection(e, ep, H);
+        }
+
+        // timeframe secundar + SEMNAL FINAL (convergenta cu graficul)
+        private void UpdateFast(double c, double e, double atr, double dAtr, int cSide, int cKind, string cWhy)
+        {
+            if (_tFinal == null) return;
+            string ftf = TfShort(FastTf), ctf = TfShort(TimeFrame);
+            if (_fb == null)
+            {
+                _tFinal.Text = "● Timeframe secundar indisponibil"; _tFinal.ForegroundColor = CMuted;
+                _tFinalSub.Text = ""; _tFast.Text = "–"; _tFastSub.Text = "";
+                return;
+            }
+            SyncFast();
+            if (_fn <= 3 * FastP3 + 1 || _fStateBar < 0)
+            {
+                _tFinal.Text = $"● Se incarca {ftf}…"; _tFinal.ForegroundColor = CMuted;
+                _tFinalSub.Text = ""; _tFast.Text = "…"; _tFast.ForegroundColor = CMuted; _tFastSub.Text = "";
+                return;
+            }
+
+            // valori in timp real (bara secundara in formare)
+            double px = _fb.ClosePrices.LastValue;
+            double l1 = _g1 + _fa1 * (px - _g1), l2 = _g2 + _fa2 * (px - _g2), l3 = _g3 + _fa3 * (px - _g3);
+            int code = FastCode(Rel(l1 - l2, _fr25), Rel(l1 - l3, _fr210));
+            bool forming = code != _fCode;
+            int dir = FastDir(code), stopped = FastStopped(code);
+
+            string name;
+            if (dir < 0) { name = "▼ SELL"; _tFast.ForegroundColor = CRed; }
+            else if (dir > 0) { name = "▲ BUY"; _tFast.ForegroundColor = CGreen; }
+            else if (stopped != 0) { name = $"▶ stop {(stopped < 0 ? "SELL" : "BUY")} (schimbare trend)"; _tFast.ForegroundColor = Color.Gray; }
+            else { name = "▶ nedefinit"; _tFast.ForegroundColor = Color.Gray; }
+
+            string age;
+            if (forming) age = "in formare";
+            else
+            {
+                int bars = _fn - _fStateBar;                               // bare inchise in aceasta stare
+                double min = (Server.Time - _fb.OpenTimes[_fStateBar]).TotalMinutes;
+                age = $"de {bars} {(bars == 1 ? "bara" : "bare")} (~{Math.Max(0, min):0} min)";
+            }
+            _tFast.Text = $"{name}  ·  {age}";
+            _tFastSub.Text = $"EMA{FastP1} {F(l1)}  ·  EMA{FastP2} {F(l2)} ({S1(l1 - l2)})  ·  EMA{FastP3} {F(l3)} ({S1(l1 - l3)})";
+            _tFastSub.ForegroundColor = CText;
+
+            // ---------------- SEMNAL FINAL ----------------
+            string dn = dir < 0 ? "SELL" : "BUY";
+            Color dc = dir < 0 ? CRed : CGreen;
+            const string ok = "✔", no = "✖";
+            if (dir == 0)
+            {
+                if (stopped != 0)
+                {
+                    string sn = stopped < 0 ? "SELL" : "BUY";
+                    _tFinal.Text = $"▶ STOP {sn} · nu intra";
+                    _tFinalSub.Text = $"{ftf}: schimbare de trend – daca esti in {sn}, ia in calcul iesirea; asteapta urmatorul semnal";
+                }
+                else { _tFinal.Text = "● ASTEAPTA"; _tFinalSub.Text = $"{ftf}: fara directie clara"; }
+                _tFinal.ForegroundColor = Color.Gray; _tFinalSub.ForegroundColor = CMuted;
+                return;
+            }
+
+            string tp = $"TP EMA{RefPeriod} {ctf} {F(e)} ({S1(e - c)} pct)";
+            if (FastSense == VeSens.Revenire)
+            {
+                bool agree = cSide != 0 && -cSide == dir;                  // pretul e pe partea din care se revine spre EMA
+                bool inZone = dAtr >= ConvMinAtr && dAtr <= ConvMaxAtr;
+                bool blocked = agree && cKind < 0;
+                string chk = $"{ftf} {dn} {ok} · pret {(cSide > 0 ? "peste" : cSide < 0 ? "sub" : "pe")} EMA{RefPeriod} {ctf} {(agree ? ok : no)}"
+                             + $" · distanta {N2(dAtr)} ATR {(inZone ? ok : no)} (zona {N1(ConvMinAtr)}–{N1(ConvMaxAtr)})";
+                if (blocked)
+                {
+                    _tFinal.Text = $"⛔ FARA INTRARE · {ftf} {dn}, {ctf} blocheaza"; _tFinal.ForegroundColor = COrange;
+                    _tFinalSub.Text = $"{cWhy} · {chk}";
+                }
+                else if (agree && inZone)
+                {
+                    _tFinal.Text = $"{(dir < 0 ? "▼▼" : "▲▲")} {dn} CONFIRMAT · {ftf} + {ctf}"; _tFinal.ForegroundColor = dc;
+                    _tFinalSub.Text = $"{chk} · {tp}";
+                }
+                else if (agree && dAtr >= SigMinAtr && dAtr < ConvMinAtr)
+                {
+                    _tFinal.Text = $"{(dir < 0 ? "▼" : "▲")} {dn} slab · doar {ftf}"; _tFinal.ForegroundColor = CMid;
+                    _tFinalSub.Text = $"{chk} · {tp}";
+                }
+                else
+                {
+                    string why = !agree ? $"pretul e pe partea opusa a EMA{RefPeriod} {ctf}"
+                               : dAtr < SigMinAtr ? $"prea aproape de EMA{RefPeriod} {ctf} (TP prea mic)"
+                               : $"peste {N1(ConvMaxAtr)} ATR – miscare de trend, risc mare";
+                    _tFinal.Text = $"● ASTEAPTA · {ftf} {dn}"; _tFinal.ForegroundColor = CMuted;
+                    _tFinalSub.Text = $"{why} · {chk}";
+                }
+            }
+            else
+            {
+                // sens Trend: confirmare = EMA-urile graficului aliniate in aceeasi directie, fara cross contra
+                int ct = _tArrow.Text == "▲" ? 1 : _tArrow.Text == "▼" ? -1 : 0;
+                bool crossAgainst = _tWarn.IsVisible && ((_tWarn.Text.StartsWith("▲") && dir < 0) || (_tWarn.Text.StartsWith("▼") && dir > 0));
+                string chk = $"{ftf} {dn} {ok} · trend {ctf} {(ct == dir ? ok : no)} · fara schimbare contra {(crossAgainst ? no : ok)}";
+                if (ct == -dir || crossAgainst)
+                {
+                    _tFinal.Text = $"⛔ FARA INTRARE · {ftf} {dn}, {ctf} contra"; _tFinal.ForegroundColor = COrange;
+                }
+                else if (ct == dir)
+                {
+                    _tFinal.Text = $"{(dir < 0 ? "▼▼" : "▲▲")} {dn} CONFIRMAT · {ftf} + {ctf}"; _tFinal.ForegroundColor = dc;
+                }
+                else { _tFinal.Text = $"{(dir < 0 ? "▼" : "▲")} {dn} slab · doar {ftf}"; _tFinal.ForegroundColor = CMid; }
+                _tFinalSub.Text = chk;
+            }
+            _tFinalSub.ForegroundColor = CText;
         }
 
         private void DrawProjection(double e0, double[] ep, int H)
@@ -792,13 +991,13 @@ namespace cAlgo.Indicators
             header.AddChild(_bMin);
             _bTitle = new Button
             {
-                Text = Title + " · " + SymbolName + " · " + TfShort(TimeFrame) + " ⇱",
+                Text = Title + " · " + SymbolName + " · " + TfShort(TimeFrame) + (ShowFast ? " + " + TfShort(FastTf) : "") + " ⇱",
                 FontSize = PanelFont + 1, FontWeight = FontWeight.Bold, BackgroundColor = CBg, ForegroundColor = CText,
                 Padding = new Thickness(3, 1, 3, 1), Margin = new Thickness(0, 0, 4, 0)
             };
             _bTitle.Click += a => ToggleMove();
             header.AddChild(_bTitle);
-            _bStat = Btn("Statistica", CBtn);
+            _bStat = Btn("Detalii", CBtn);
             _bStat.Click += a => { _showStat = !_showStat; ApplyVisibility(); SaveUI(); };
             header.AddChild(_bStat);
             outer.AddChild(header);
@@ -831,13 +1030,31 @@ namespace cAlgo.Indicators
             _tArrow = T("▶", 5, CMuted, true); _tArrow.Margin = new Thickness(0, 0, 6, 0); _tArrow.TextWrapping = TextWrapping.NoWrap;
             var r1 = new StackPanel { Orientation = Orientation.Horizontal };
             r1.AddChild(_tArrow); r1.AddChild(_tD1);
-            _tSig = T("", 4, CMid, true);
-            _tSig.Margin = new Thickness(0, 2, 0, 4);
-            _body.AddChild(_tSig);
-            _body.AddChild(r1); _body.AddChild(_tD2); _body.AddChild(_tSub); _body.AddChild(_tZone);
-            _body.AddChild(_tRev); _body.AddChild(_tCal); _body.AddChild(_tWarn); _body.AddChild(_tModel);
+            _tSig = T("", 2, CMid, true);
+            _tSig.Margin = new Thickness(0, 2, 0, 3);
 
+            // --- zona 1: SEMNAL FINAL ---
+            _tFinal = T("", 6, CMuted, true); _tFinal.Margin = new Thickness(0, 2, 0, 0);
+            _tFinalSub = T("", 0, CText); _tFinalSub.Margin = new Thickness(0, 0, 0, 2);
+            // --- zona 2: timeframe secundar ---
+            _tFastHdr = T($"── {TfShort(FastTf)} · EMA {FastP1} / {FastP2} / {FastP3} ──", -1, CMuted, true); _tFastHdr.Margin = new Thickness(0, 6, 0, 0);
+            _tFast = T("", 4, CMuted, true);
+            _tFastSub = T("", 0, CText);
+            // --- zona 3: graficul curent ---
+            _tChartHdr = T($"── {TfShort(TimeFrame)} (grafic) · revenire la EMA{RefPeriod} ──", -1, CMuted, true); _tChartHdr.Margin = new Thickness(0, 6, 0, 0);
+            if (ShowFast)
+            {
+                _body.AddChild(_tFinal); _body.AddChild(_tFinalSub);
+                _body.AddChild(_tFastHdr); _body.AddChild(_tFast); _body.AddChild(_tFastSub);
+                _body.AddChild(_tChartHdr);
+            }
+            _body.AddChild(_tSig);
+            _body.AddChild(r1); _body.AddChild(_tD2); _body.AddChild(_tZone);
+            _body.AddChild(_tRev); _body.AddChild(_tWarn);
+
+            // --- detalii (sub buton): model, verificare, statistica ---
             _statBox = new StackPanel { Margin = new Thickness(0, 6, 0, 0) };
+            _statBox.AddChild(_tSub); _statBox.AddChild(_tCal); _statBox.AddChild(_tModel);
             for (int k = 0; k < 7; k++) { var t = T("", -1, k == 0 ? CText : CMid, k == 0); _tStat.Add(t); _statBox.AddChild(t); }
             _body.AddChild(_statBox);
             outer.AddChild(_body);
@@ -853,7 +1070,7 @@ namespace cAlgo.Indicators
             _body.IsVisible = !_min;
             _statBox.IsVisible = _showStat;
             _bMin.Text = _min ? "+" : "–";
-            _bStat.Text = _showStat ? "Statistica ▴" : "Statistica ▾";
+            _bStat.Text = _showStat ? "Detalii ▴" : "Detalii ▾";
         }
 
         private bool CornerRight => _corner == (int)VeColt.DreaptaSus || _corner == (int)VeColt.DreaptaJos;
